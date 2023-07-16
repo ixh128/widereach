@@ -43,7 +43,7 @@ int pow10quick(int d) {
   return partial * partial;
 }
 
-#define FACT_MAX 9
+#define FACT_MAX 16
 unsigned int factorial[FACT_MAX];
 
 void initialize_factorial() {
@@ -269,19 +269,19 @@ exp_res_t experiment(int param_setting) {
      * south german credit  .9 (2, 1) (originally said 0.95 here)
      * crop mapping  .99 (76, 0.974359); 
      * */
-    env.params->theta = 0.99;
-    double lambda_factor = 100;
+    env.params->theta = 0.04;
+    double lambda_factor = 25;
     //env.params->theta = 0.99;
     env.params->branch_target = 0.0;
     env.params->iheur_method = deep;
-    int n = 4000;
+    int n = 40000;
     // env.params->lambda = 100 * (n + 1); 
     env.params->rnd_trials = 10000;
     // env.params->rnd_trials_cont = 10;
     env.params->rnd_trials_cont = 0;
     
     //size_t dimension = param_setting;
-    size_t dimension = 32;
+    size_t dimension = 13;
     
     clusters_info_t clusters[2];
     // int n = pow10quick(dimension);
@@ -304,12 +304,14 @@ exp_res_t experiment(int param_setting) {
     simplex_info_t simplex_info = {
       .count = n,
       .positives = n / 5,
-      .cluster_cnt = 4,
+      .cluster_cnt = 16,
       .dimension = dimension,
       .side = side,
-      .cluster_sizes = cluster_sizes
+      //.cluster_sizes = cluster_sizes
     };
-    
+    /*for(int i = 0; i < simplex_info.cluster_cnt; i++)
+      printf("%s%ld", i == 0 ? "cluster sizes: " : ", ", cluster_sizes[i]);
+      printf("\n");*/
     srand48(validation_seed);
     samples_t *samples_validation;
     samples_validation = random_samples(n, n / 2, dimension);
@@ -372,8 +374,8 @@ exp_res_t experiment(int param_setting) {
 	  //fopen("../../data/finance_data/finance-train.dat", "r");
 	    // fopen("./small-sample.dat", "r");
 	  //full data sets:
-	  fopen("../../data/breast-cancer/wdbc.dat", "r");
-	  //fopen("../../data/wine-quality/red-cross/winequality-red.dat", "r");
+	  //fopen("../../data/breast-cancer/wdbc.dat", "r");
+	  fopen("../../data/wine-quality/red-cross/winequality-red.dat", "r");
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1.dat", "r");
 	  //fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
 	  //fopen("../../data/crops/small-sample.dat", "r");
@@ -381,7 +383,10 @@ exp_res_t experiment(int param_setting) {
 	fclose(infile);
 	//write_samples(samples, "2cluster4000.dat");
 	//exit(0);
-	
+
+	//print_samples(samples);
+
+	//add_bias(samples);
         env.samples = samples;
         n = samples_total(samples);
         env.params->lambda = lambda_factor * (n + 1);
@@ -415,13 +420,22 @@ exp_res_t experiment(int param_setting) {
 	      printf("%d pos, %d neg\n", npos, nneg);
 	    exit(0);*/
 	    
-	    //h = single_siman_run(seed, 0, &env, NULL);
+	    h = single_siman_run(seed, 0, &env, NULL);
+	    exit(0);
 	    /*for(int i = 0; i <= 2; i++) {
 	      double *insep = compute_inseparabilities(&env, i);
 	      printf("i = %d => viol = %g\n", i, *insep);
 	      free(insep);
 	    }
 	    exit(0);*/
+
+	    /*double *h = single_exact_run(&env);
+	    double obj = hyperplane_to_solution(h, NULL, &env);
+	    printf("Solved. Obj = %g\n", obj);
+	    printf("Hyperplane: ");
+	    for(int i = 0; i < env.samples->dimension; i++)
+	      printf("%g%s", h[i], (i == env.samples->dimension - 1) ? "\n" : " ");
+	      exit(0);*/
 	    
 	    //Training results testing:
 	    if(param_setting <= 1) {

@@ -8,6 +8,7 @@ void mirror_sample(size_t dimension, double *sample) {
 }
 
 double **random_simplex_points_old(size_t count, simplex_info_t *simplex_info) {
+  /* this is the old function to generate the cluster benchmark */
 	double **samples = CALLOC(count, double *);
     size_t count_simplex = count / 2;
     size_t mirror_count = count_simplex / simplex_info->cluster_cnt;
@@ -24,10 +25,22 @@ double **random_simplex_points_old(size_t count, simplex_info_t *simplex_info) {
 	return samples;
 }
 
+void shuffle(size_t *arr, size_t n) {
+  /** rearrange elements of arr in a random order */
+  if (n > 1) {
+    for (size_t i = 0; i < n - 1; i++) {
+      size_t j = i + rand() / (RAND_MAX / (n - i) + 1);
+      int tmp = arr[j];
+      arr[j] = arr[i];
+      arr[i] = tmp;
+    }
+  }
+}
+
 double **random_simplex_points(size_t count, simplex_info_t *simplex_info) {
   double **samples = CALLOC(count, double *);
   size_t count_simplex = count / 2;
-  size_t *cutoff_pts = CALLOC(simplex_info->cluster_cnt, size_t); //the points at which we switch from one cluster to the next
+  size_t *cutoff_pts = CALLOC(simplex_info->cluster_cnt, size_t); //the indices at which we switch from one cluster to the next
   if(simplex_info->cluster_sizes == NULL) {
     size_t cluster_size = count_simplex / simplex_info->cluster_cnt;
     cutoff_pts[0] = cluster_size;
@@ -42,11 +55,21 @@ double **random_simplex_points(size_t count, simplex_info_t *simplex_info) {
   }
   size_t dimension = simplex_info->dimension;
 
+  size_t *cluster_order = CALLOC(simplex_info->dimension, size_t);
+  for(int i = 0; i < simplex_info->dimension; i++) {
+    cluster_order[i] = i;
+  }
+  shuffle(cluster_order, simplex_info->dimension); //shuffle the whole array, but we may not use all of it
+  /*for(int i = 0; i < simplex_info->cluster_cnt; i++)
+    printf("%s%ld", i == 0 ? "cluster order: " : ", ", cluster_order[i]);
+    printf("\n");*/
+
+
   size_t cluster_idx = 0; //which cluster is currently being added to
   for (size_t j = 0; j < count_simplex; j++) {
     samples[j] = random_simplex_point(simplex_info->side, dimension);
     /*if (j >= cluster_size) {
-      mirror_sample(dimension, samples[j]);      
+      mirror_sample(dimension, samples[j]);
       }*/
     if(j >= cutoff_pts[cluster_idx]) {
       cluster_idx++;
@@ -55,7 +78,7 @@ double **random_simplex_points(size_t count, simplex_info_t *simplex_info) {
       mirror_sample(dimension, samples[j]);
     } else { //otherwise, proceed assuming that we fill all corners sequentially with clusters
       for(size_t i = 0; i < dimension; i++) {
-	if(cluster_idx & (1 << i)) { //if the ith bit in the cluster idx is set, we should mirror over the ith dimension
+	if(cluster_order[cluster_idx] & (1 << i)) { //if the ith bit in the cluster idx is set, we should mirror over the ith dimension
 	  samples[j][i] = 1 - samples[j][i];
 	}
       }
@@ -64,6 +87,8 @@ double **random_simplex_points(size_t count, simplex_info_t *simplex_info) {
   for (size_t j = count_simplex; j < count; j++) {
     samples[j] = random_point(dimension);
   }
+  free(cluster_order);
+  free(cutoff_pts);
   return samples;
 }
 

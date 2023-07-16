@@ -17,7 +17,7 @@ OBJ = samples.o sparse_vector.o env.o indexing.o glpk.o params.o callback.o \
       traversal.o signature.o children.o paths.o random.o hyperplane.o \
       obstruction.o interdiction.o cuts.o icutgen.o readsamples.o clusters.o \
       exec.o simplex.o \
-      gurobi_exec.o gurobi.o bg_callback.o gurobi_callback.o constrained_hyperplane.o simulated_annealing.o sep_test.o
+      gurobi_exec.o gurobi.o bg_callback.o gurobi_callback.o constrained_hyperplane.o simulated_annealing.o sep_test.o cones.o
 UOBJ = utest.o
 
 .PHONY: all coverage clean dependencies valgrind cleancoverage

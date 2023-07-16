@@ -1,5 +1,7 @@
 #include "widereach.h"
 #include "helper.h"
+#include <string.h>
+
 
 /* -------------------- Samples ------------------------------------------ */
 
@@ -184,4 +186,24 @@ int reduce(
   }
 
   return 0;
+}
+
+
+void add_bias(samples_t *samples) {
+  for(int class = 0; class < 2; class++) {
+    for(size_t i = 0; i < samples->count[class]; i++) {
+      double *s = samples->samples[class][i];
+      //double *new_s = realloc(s, samples->dimension+1);
+      double *new_s = CALLOC(samples->dimension+1, double);
+      memcpy(new_s, s, sizeof(double)*samples->dimension);
+      if(!new_s) {
+	printf("add_bias: realloc failed\n");
+	exit(EXIT_FAILURE);
+      }
+      s = new_s;
+      s[samples->dimension] = 1;
+      samples->samples[class][i] = s;
+    }
+  }
+  samples->dimension++;
 }

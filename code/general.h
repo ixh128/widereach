@@ -743,3 +743,9 @@ double precision_scan(
 
 /** Solve by simulated annealing */
 double *single_siman_run(unsigned int *seed, int iter_lim, env_t *env, double *h0);
+
+/** Solve by cones algorithm */
+double *single_exact_run(env_t *env);
+
+/** Add an extra feature to each sample which is always equal to 1 */
+void add_bias(samples_t *);
