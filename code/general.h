@@ -744,8 +744,78 @@ double precision_scan(
 /** Solve by simulated annealing */
 double *single_siman_run(unsigned int *seed, int iter_lim, env_t *env, double *h0);
 
+#include <gsl/gsl_blas.h>
+
+/** Stores samples in GSL vector form */
+typedef struct {
+  /** Dimension of the sample space, and 
+   * size of the values array of all samples in the array */
+  size_t dimension;
+  /** Number of sample categories. */
+  size_t class_cnt;
+  /** Number of samples in each category */
+  size_t *count;
+  /** Label of the samples in each category */
+  int *label;
+  /** Sample array. 
+   * The ith array contains count[i] samples in class label[i].
+   * Each sample is a pointer to a gsl_vector of its components.*/
+  gsl_vector ***samples;
+} vsamples_t;
+
+vsamples_t *samples_to_vec(samples_t *);
+void vsamples_free(vsamples_t *);
+
+
+typedef struct obj_result {
+  double obj;
+  double prec;
+} obj_result;
+obj_result compute_obj(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c);
+gsl_vector *apply_proj(const gsl_matrix *c, const gsl_vector *x);
+
 /** Solve by cones algorithm */
 double *single_exact_run(env_t *env);
 
 /** Add an extra feature to each sample which is always equal to 1 */
 void add_bias(samples_t *);
+
+typedef struct {
+  double obj;
+  gsl_vector *w;
+} cones_result_t; //stores the result of the cones algorithm, if it exists
+
+/** Stores a single subproblem for the cones algorithm */
+typedef struct {
+  size_t D;
+  gsl_matrix *c;
+  double score;
+  struct last_proj {
+    size_t class;
+    size_t idx;
+  } last_proj;
+} subproblem_t;
+
+/** Priority queue of subproblems */
+typedef struct {
+  size_t k; //size of heap = 2^k - 1
+  size_t sz; //current max size of heap
+  size_t n; //current number of elements
+  subproblem_t **heap;
+  int mt; //1 if multithreaded
+  pthread_mutex_t lock; //mutex (if multithreaded)
+  pthread_t thread;
+} prio_queue_t;
+
+prio_queue_t *create_prio_queue(int mt);
+void prio_enqueue(prio_queue_t *, subproblem_t *);
+subproblem_t *prio_pop_max(prio_queue_t *);
+size_t prio_get_n(prio_queue_t *);
+
+double *single_siman_cones_run(unsigned int *, int, env_t *, int *);
+void add_new_proj_ip(gsl_matrix *, const gsl_vector *);
+gsl_vector *get_proj_basis(env_t *, gsl_vector **);
+
+double *best_random_hyperplane_proj(int, env_t *);
+
+double *single_exact_run_open(env_t *);

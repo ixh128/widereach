@@ -121,7 +121,7 @@ double *single_gurobi_run(unsigned int *seed,
     
     if (seed != NULL) {
       printf("Applying seed %u\n", *seed);
-        srand48(*seed);
+      //srand48(*seed);
     }
 
     int state;
@@ -176,7 +176,8 @@ double *single_gurobi_run(unsigned int *seed,
       GRBwrite(model, "post.prm");*/
     
     printf("Generating best of %d hyperplanes\n", env->params->rnd_trials);
-    double *h = best_random_hyperplane(1, env);
+    double *h = best_random_hyperplane_proj(1, env);
+    //double *h = single_exact_run(env);
     printf("Dimension = %lu\n", env->samples->dimension);
     //for(int i = 0; i < env->samples->dimension+1; i++) h[i] /= 100;
     //printf("Hyperplane: %0.3f %0.3f %0.3f %0.3f\n", h[0], h[1], h[2], h[3]);

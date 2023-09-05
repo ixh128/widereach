@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <glpk.h>
 #include <gurobi_c.h>
+#include <pthread.h>
 
 //#define EXPERIMENTAL
 

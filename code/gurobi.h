@@ -74,3 +74,8 @@ double *random_constrained_hyperplane(env_t *env, double *rel_sol, sys7_t *s);
 sys7_t *generate_fixedpt_mat(env_t *env, double *rel_sol);
 
 void *compute_inseparabilities(env_t *, int);
+
+int add_gurobi_hyperplane(GRBmodel *, size_t);
+int add_gurobi_sample_var(GRBmodel *, int, char *);
+int error_handle(int state, GRBmodel *model, char *step);
+double *single_gurobi_cones_run(unsigned int *, int, int, env_t *);

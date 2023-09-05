@@ -253,6 +253,18 @@ GRBmodel *gurobi_milp(int *state, const env_t *env) {
     TRY_MODEL_ON(add_gurobi_samples(model, env))
         
       TRY_MODEL_ON(add_gurobi_precision(model, env))
+      int nvars;
+
+    GRBupdatemodel(model);
+    /*GRBgetintattr(model, GRB_INT_ATTR_NUMVARS, &nvars);
+  printf("nvars = %d\n", nvars);
+  printf(" idx  | name \n");
+  printf("-------------\n");
+  for(int i = 0; i < nvars; i++) {
+    char *name;
+    GRBgetstrattrelement(model, GRB_STR_ATTR_VARNAME, i, &name);
+    printf(" %4d | %s\n", i, name);
+    }*/
       /*      *state = add_gurobi_precision_thr(model, env);
     printf("State = %d\n", *state);
     printf("Added precision");*/
