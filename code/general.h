@@ -766,7 +766,6 @@ typedef struct {
 vsamples_t *samples_to_vec(samples_t *);
 void vsamples_free(vsamples_t *);
 
-
 typedef struct obj_result {
   double obj;
   double prec;
@@ -775,10 +774,14 @@ obj_result compute_obj(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c)
 gsl_vector *apply_proj(const gsl_matrix *c, const gsl_vector *x);
 
 /** Solve by cones algorithm */
-double *single_exact_run(env_t *env);
+double *single_exact_run(env_t *env, int n_round_pts);
 
 /** Add an extra feature to each sample which is always equal to 1 */
 void add_bias(samples_t *);
+
+/** Scale all samples to have unit norm.
+    This yields an equivalent problem if the problem is unbiased */
+void normalize_samples(samples_t *);
 
 typedef struct {
   double obj;
@@ -790,9 +793,10 @@ typedef struct {
   size_t D;
   gsl_matrix *c;
   double score;
+  double *m; //this can be ignored for the closed problem
   struct last_proj {
     size_t class;
-    size_t idx;
+    size_t idx; //this is also used as the index of the rounding point
   } last_proj;
 } subproblem_t;
 
@@ -803,7 +807,9 @@ typedef struct {
   size_t n; //current number of elements
   subproblem_t **heap;
   int mt; //1 if multithreaded
+  int running; //1 if thread is currently running
   pthread_mutex_t lock; //mutex (if multithreaded)
+  pthread_mutex_t running_lock;
   pthread_t thread;
 } prio_queue_t;
 
@@ -819,3 +825,13 @@ gsl_vector *get_proj_basis(env_t *, gsl_vector **);
 double *best_random_hyperplane_proj(int, env_t *);
 
 double *single_exact_run_open(env_t *);
+
+typedef struct {
+  size_t n; //number of points
+  gsl_vector **pts; //points
+} round_pts_t;
+
+gsl_vector **uniform_sphere_points(size_t n, size_t d);
+double *best_random_hyperplane_unbiased(int, env_t *);
+gsl_vector **random_round_points(env_t *, vsamples_t *, size_t);
+vsamples_t *create_rounded_vs(vsamples_t *, round_pts_t *);

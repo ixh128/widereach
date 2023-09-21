@@ -128,7 +128,8 @@ void siman_cones_step(const gsl_rng *r, void *xp, double step_size) {
       sample_locator_t *loc = locator(i+d+2, env->samples);
       gsl_vector *s = vs->samples[loc->class][loc->index];
       free(loc);
-      double dot;
+      double dot; //probably should actually compute the angle/dist instead of dot
+      //since dot is the cosine of the angle, which isn't monotone
       gsl_blas_ddot(rnd_s, s, &dot);
       if(dot < step_size && dot > highest_dist) {
 	int taken = 0;
@@ -191,7 +192,7 @@ double *single_siman_cones_run(unsigned int *seed, int iter_lim, env_t *env_p, i
   srand48(*seed);
   int d = env->samples->dimension;
   if(!init) {
-    //todo: find a better initializer
+    //todo: find a better initializer - use best_random_hyperplane_proj
 
     //this assumes that there are at least d-1 samples, which is fine
     init = CALLOC(d-1, int);

@@ -270,18 +270,18 @@ exp_res_t experiment(int param_setting) {
      * south german credit  .9 (2, 1) (originally said 0.95 here)
      * crop mapping  .99 (76, 0.974359); 
      * */
-    env.params->theta = 0.99;
-    double lambda_factor = 100;
+    env.params->theta = 0.9;
+    double lambda_factor = 10;
     env.params->branch_target = 0.0;
     env.params->iheur_method = deep;
-    int n = 100;
+    int n = 40;
     // env.params->lambda = 100 * (n + 1); 
     env.params->rnd_trials = 10000;
     // env.params->rnd_trials_cont = 10;
     env.params->rnd_trials_cont = 0;
     
     //size_t dimension = param_setting;
-    size_t dimension = 8;
+    size_t dimension = 2;
     
     clusters_info_t clusters[2];
     // int n = pow10quick(dimension);
@@ -355,8 +355,7 @@ exp_res_t experiment(int param_setting) {
         printf("Sample seed: %lu\n", samples_seeds[s]);
     
         samples_t *samples;
-
-        samples = random_samples(n, n / 2, dimension);
+        //samples = random_samples(n, n / 2, dimension);
         //samples = random_sample_clusters(clusters);
 	//samples = random_simplex_samples(&simplex_info);
         infile =
@@ -377,18 +376,21 @@ exp_res_t experiment(int param_setting) {
 	  //fopen("../../data/breast-cancer/wdbc.dat", "r");
 	  //fopen("../../data/wine-quality/red-cross/winequality-red.dat", "r");
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1.dat", "r");
-	  fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
+	  //fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
 	  //fopen("../../data/crops/small-sample.dat", "r");
-	//samples = read_binary_samples(infile);
+	  fopen("../../data/south-german-credit/SouthGermanCredit_pca4.dat", "r");
+	samples = read_binary_samples(infile);
 	fclose(infile);
 	//write_samples(samples, "2cluster4000.dat");
 	//exit(0);
 
 	//print_samples(samples);
 
-	add_bias(samples);
-	print_samples(samples);
         env.samples = samples;
+	add_bias(samples);
+	feature_scaling(&env);
+	normalize_samples(samples);
+	//print_samples(samples);
         n = samples_total(samples);
         env.params->lambda = lambda_factor * (n + 1);
 	env.params->epsilon_precision = 3./990;
@@ -421,8 +423,8 @@ exp_res_t experiment(int param_setting) {
 	      printf("%d pos, %d neg\n", npos, nneg);
 	    exit(0);*/
 	    
-	    h = single_siman_cones_run(seed, 0, &env, NULL);
-	    exit(0);
+	    /*h = single_siman_cones_run(seed, 0, &env, NULL);
+	      exit(0);*/
 	    /*for(int i = 0; i <= 2; i++) {
 	      double *insep = compute_inseparabilities(&env, i);
 	      printf("i = %d => viol = %g\n", i, *insep);
@@ -431,16 +433,16 @@ exp_res_t experiment(int param_setting) {
 	    exit(0);*/
 
 	    //double *h = single_gurobi_cones_run(seed, 120000, 1200, &env);
-	    /*double *h = single_exact_run_open(&env);
-	    double obj = hyperplane_to_solution(h, NULL, &env);
-	    printf("Solved. Obj = %g\n", obj);
-	    printf("Hyperplane: ");
-	    for(int i = 0; i < env.samples->dimension; i++)
-	      printf("%g%s", h[i], (i == env.samples->dimension - 1) ? "\n" : " ");
-	      exit(0);*/
-	    
 	    //Training results testing:
-	    if(param_setting <= 1) {
+	    if(param_setting <= 0) {
+	      double *h = single_exact_run(&env, 100);
+	      double obj = hyperplane_to_solution(h, NULL, &env);
+	      printf("Solved. Obj = %g\n", obj);
+	      printf("Hyperplane: ");
+	      for(int i = 0; i < env.samples->dimension; i++)
+		printf("%g%s", h[i], (i == env.samples->dimension - 1) ? "\n" : " ");
+	      exit(0);
+	    } else if(param_setting == 1) {
 	      //use gurobi
 	      gurobi_param p = {param_setting, 0, 0, GRB_INFINITY, -1, 0.15, -1};
 	      h = single_gurobi_run(seed, 120000, 1200, &env, &p);

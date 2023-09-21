@@ -11,10 +11,52 @@ prio_queue_t *create_prio_queue(int mt) {
   if(mt) {
     q->mt = 1;
     pthread_mutex_init(&q->lock, NULL);
+    pthread_mutex_init(&q->running_lock, NULL);
   } else {
     q->mt = 0;
   }
   return q;
+}
+
+void prio_join(prio_queue_t *q) {
+  pthread_mutex_lock(&q->running_lock);
+  if(q->running) {
+    //this is technically a hold-and-wait, but it shouldn't matter
+    //need to ensure q->thread never calls a function which uses running_lock
+    pthread_join(q->thread, NULL);
+    q->running = 0;
+  }
+  pthread_mutex_unlock(&q->running_lock);
+}
+
+void prio_start_fn(prio_queue_t *q, void *f(void *), void *args) {
+  pthread_mutex_lock(&q->running_lock);
+  if(q->running) {
+    printf("attempted to start function on running thread\n");
+    pthread_mutex_unlock(&q->running_lock);
+    return;
+  }
+  q->running = 1;
+  pthread_create(&q->thread, NULL, f, args);
+  pthread_mutex_unlock(&q->running_lock);
+}
+
+void prio_join_and_start(prio_queue_t *q, void *f(void *), void *args) {
+  //atomically join the current thread in q and start a new one
+  pthread_mutex_lock(&q->running_lock);
+  if(q->running) {
+    pthread_join(q->thread, NULL);
+    q->running = 0;
+  }
+  if(q->running) {
+    printf("attempted to start function on running thread\n");
+    pthread_mutex_unlock(&q->running_lock);
+    return;
+  }
+  q->running = 1;
+  pthread_create(&q->thread, NULL, f, args);
+  pthread_mutex_unlock(&q->running_lock);
+  
 }
 
 void prio_enlarge(prio_queue_t *q) {
@@ -35,9 +77,13 @@ void prio_swap(prio_queue_t *q, int i, int j) {
 
 size_t prio_get_n(prio_queue_t *q) {
   if(q->mt) {
-    pthread_join(q->thread, NULL);
+    prio_join(q);
+    pthread_mutex_lock(&q->lock);
   }
-  return q->n;
+  size_t out = q->n;
+  if(q->mt)
+    pthread_mutex_unlock(&q->lock);
+  return out;
 }
 
 typedef struct enq_args_t {
@@ -50,7 +96,9 @@ void *prio_enqueue_mt(void *args) {
   enq_args_t *argsf = args;
   prio_queue_t *q = argsf->q;
   subproblem_t *prob = argsf->prob;
+  //printf("about to get pq lock (enq)\n");
   pthread_mutex_lock(&q->lock);
+  //printf("got pq lock (enq)\n");
   if(q->n == q->sz)
     prio_enlarge(q);
   q->heap[q->n++] = prob;
@@ -60,18 +108,21 @@ void *prio_enqueue_mt(void *args) {
     i = prio_parent(i);
   }
   pthread_mutex_unlock(&q->lock);
+  //printf("released pq lock (enq)\n");
   free(args);
   return NULL;
 }
 
 void prio_enqueue(prio_queue_t *q, subproblem_t *prob) {
   if(q->mt) {
-    pthread_join(q->thread, NULL);
+    //printf("about to join pq thread (enq)\n");
+    //printf("joined pq thread (enq)\n");
     //enq_args_t args = {.q = q, .prob = prob};
     enq_args_t *args = CALLOC(1, enq_args_t);
     args->q = q;
     args->prob = prob;
-    pthread_create(&q->thread, NULL, prio_enqueue_mt, args);
+    prio_join_and_start(q, prio_enqueue_mt, args);
+    //printf("created pq thread (enq)\n");
     return;
   }
   if(q->n == q->sz)
@@ -113,9 +164,12 @@ void *sift_down_mt(void *args) {
   sift_args_t *argsf = args;
   prio_queue_t *q = argsf->q;
   int k = argsf->k;
+  //printf("about to get pq lock (sd)\n");
   pthread_mutex_lock(&q->lock);
+  //printf("got pq lock (sd)\n");
   sift_down(q, k);
   pthread_mutex_unlock(&q->lock);
+  //printf("released pq lock (sd)\n");
   free(args);
   return NULL;
 }
@@ -123,17 +177,19 @@ void *sift_down_mt(void *args) {
 subproblem_t *prio_pop_max(prio_queue_t *q) {
   if(prio_get_n(q) == 0)
     return NULL;
+  //printf("about to get pq lock (pop)\n");
   if(q->mt) pthread_mutex_lock(&q->lock);
+  //printf("got pq lock (pop)\n");
   subproblem_t *max = q->heap[0];
   q->heap[0] = q->heap[q->n-1];
   q->n--;
   if(q->mt) {
     pthread_mutex_unlock(&q->lock);
-    pthread_join(q->thread, NULL);
+    //printf("released pq lock (pop)\n");
     sift_args_t *args = CALLOC(1, sift_args_t);
     args->q = q;
     args->k = 0;
-    pthread_create(&q->thread, NULL, sift_down_mt, args);
+    prio_join_and_start(q, sift_down_mt, args);
   } else {
     sift_down(q, 0);
   }

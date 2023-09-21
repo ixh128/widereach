@@ -1,6 +1,9 @@
 #include "widereach.h"
 #include "helper.h"
 #include <string.h>
+#include <gsl/gsl_rng.h>
+#include <gsl/gsl_randist.h>
+#include <math.h>
 
 
 /* -------------------- Samples ------------------------------------------ */
@@ -206,4 +209,104 @@ void add_bias(samples_t *samples) {
     }
   }
   samples->dimension++;
+}
+
+void normalize_samples(samples_t *samples) {
+  //scales all samples to have unit norm
+  //this is valid if the problem is unbiased
+  size_t d = samples->dimension;
+  for(int class = 0; class < 2; class++) {
+    for(size_t i = 0; i < samples->count[class]; i++) {
+      double *s = samples->samples[class][i];
+      double norm = 0;
+      for(int j = 0; j < d; j++)
+	norm += s[j]*s[j];
+      norm = sqrt(norm);
+      for(int j = 0; j < d; j++)
+	s[j] /= norm;
+    }
+  }
+}
+
+gsl_vector **uniform_sphere_points(size_t n, size_t d) {
+  gsl_vector **pts = CALLOC(n, gsl_vector *);
+  gsl_rng *r = gsl_rng_alloc(gsl_rng_taus);
+  gsl_rng_set(r, rand());
+  for(int i = 0; i < n; i++) {
+    pts[i] = gsl_vector_alloc(d);
+    double *v = CALLOC(d, double);
+    gsl_ran_dir_nd(r, d, v);
+    gsl_vector_view view = gsl_vector_view_array(v, d);
+    gsl_vector_memcpy(pts[i], &view.vector);
+    free(v);
+  }
+  gsl_rng_free(r);
+  return pts;
+}
+
+gsl_vector **random_round_points(env_t *env, vsamples_t *vs, size_t n) {
+  size_t d = env->samples->dimension;
+  if(n > samples_total(env->samples)) {
+    printf("ERR: too many round pts\n");
+    return NULL;
+  }
+  int *taken_pts = CALLOC(samples_total(env->samples), int); //=1 if taken, 0 otherwise
+  gsl_rng *r = gsl_rng_alloc(gsl_rng_taus);
+  gsl_rng_set(r, rand());
+  
+  int idx;
+  for(int i = 0; i < n; i++) {
+    do {
+      idx = gsl_rng_uniform_int(r, samples_total(env->samples));
+    } while (taken_pts[idx]);
+    taken_pts[idx] = 1;
+  }
+
+  gsl_vector **pts = CALLOC(n, gsl_vector *);
+  int k = 0;
+  for(int i = 0; i < samples_total(env->samples); i++) {
+    if(!taken_pts[i]) continue;
+    sample_locator_t *loc = locator(i+d+2, env->samples);
+    //pts[k++] = vs->samples[loc->class][loc->index];
+    pts[k] = gsl_vector_calloc(d);
+    gsl_vector_memcpy(pts[k++], vs->samples[loc->class][loc->index]);
+    free(loc);
+  }
+  
+  gsl_rng_free(r);
+  free(taken_pts);
+  return pts;
+}
+
+vsamples_t *create_rounded_vs(vsamples_t *vs, round_pts_t *round_pts) {
+  size_t n = round_pts->n;
+  size_t d = vs->dimension;
+  vsamples_t *rvs = malloc(sizeof(vsamples_t));
+  rvs->dimension = d;
+  rvs->class_cnt = vs->class_cnt;
+  rvs->count = CALLOC(vs->class_cnt, size_t);
+  memcpy(rvs->count, vs->count, vs->class_cnt*sizeof(size_t));
+  rvs->label = CALLOC(vs->class_cnt, int);
+  memcpy(rvs->label, vs->label, vs->class_cnt*sizeof(int));
+  rvs->samples = CALLOC(vs->class_cnt, gsl_vector **);
+  for(int class = 0; class < vs->class_cnt; class++) {
+    rvs->samples[class] = CALLOC(rvs->count[class], gsl_vector *);
+    for(int i = 0; i < vs->count[class]; i++) {
+      rvs->samples[class][i] = gsl_vector_calloc(d);
+      double min_angle = 1e101;
+      int closest_idx;
+      for(int j = 0; j < n; j++) {
+	//assuming normalized data, angle = acos(dot product)
+	double cos_ang, angle;
+	gsl_blas_ddot(vs->samples[class][i], round_pts->pts[j], &cos_ang);
+	angle = acos(cos_ang);
+	if(angle < min_angle) {
+	  min_angle = angle;
+	  closest_idx = j; 
+	}
+      }
+      gsl_vector_memcpy(rvs->samples[class][i], round_pts->pts[closest_idx]);
+    }
+  }
+  return rvs;
 }
