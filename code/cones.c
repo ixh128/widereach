@@ -98,6 +98,7 @@ sparse_vector_t *copy_sparse_vector(sparse_vector_t *v) {
   return cp;
 }
 
+// c = NULL for non cones
 obj_result compute_obj(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c) {
   size_t reach = 0, nfpos = 0;
   size_t dimension = env->samples->dimension;

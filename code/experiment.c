@@ -29,7 +29,7 @@ unsigned int mip_seeds[MIP_SEEDS] = {
     83898336, 41744843, 153111583, 318522606, 952537249, 298531860
 };
 
-unsigned long int validation_seed = 593587157;
+unsigned long int validation_seed = 711104006;
 
 // Compute 10^d, where d is even or d=1, 3
 int pow10quick(int d) {
@@ -148,15 +148,17 @@ int main_glpk() {
     // for (int s = 0; s < SAMPLE_SEEDS; s++) {
     for (int s = 0; s < 1; s++) {
         srand48(samples_seeds[s]);
+	glp_printf("Found norm 0 in feature scaling\n");
+
         glp_printf("Sample seed: %lu\n", samples_seeds[s]);
+	glp_printf("Found norm 0 in feature scaling 12\n");
     
         samples_t *samples;
         
         // samples = random_samples(n, n / 2, dimension);
         samples = random_sample_clusters(clusters);
         // samples = random_simplex_samples(&simplex_info);
-        //infile =
-            // fopen("../../data/breast-cancer/wdbc-training.dat", "r");
+        // infile = fopen("../../data/breast-cancer/wdbc-training.dat", "r");
             // fopen("../../data/wine-quality/winequality-red-training.dat", "r");
             // fopen("../../data/wine-quality/red-cross/winequality-red-2-training.dat", "r");
             // fopen("../../data/wine-quality/winequality-white-training.dat", "r"); 
@@ -352,7 +354,12 @@ exp_res_t experiment(int param_setting) {
     for (int s = 0; s < SAMPLE_SEEDS; s++) {
     //for (int s = 0; s < 1; s++) {
         srand48(samples_seeds[s]);
+	printf("Found norm 0 in feature scaling\n");
+
+
         printf("Sample seed: %lu\n", samples_seeds[s]);
+	printf("Found norm 0 in feature scaling\n");
+
     
         samples_t *samples;
         //samples = random_samples(n, n / 2, dimension);
@@ -376,9 +383,11 @@ exp_res_t experiment(int param_setting) {
 	  //fopen("../../data/breast-cancer/wdbc.dat", "r");
 	  //fopen("../../data/wine-quality/red-cross/winequality-red.dat", "r");
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1.dat", "r");
-	  //fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
+	  fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
 	  //fopen("../../data/crops/small-sample.dat", "r");
-	  fopen("../../data/south-german-credit/SouthGermanCredit_pca4.dat", "r");
+    // fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
+
+  
 	samples = read_binary_samples(infile);
 	fclose(infile);
 	//write_samples(samples, "2cluster4000.dat");
@@ -527,6 +536,8 @@ exp_res_t experiment(int param_setting) {
 }
 
 int main(int argc, char *argv[]) {
+	printf("Found norm 0 in feature scaling\n");
+
   /*int nsettings = 10;
   exp_res_t *results = CALLOC(nsettings, exp_res_t);
   for(int i = 0; i < nsettings; i++)
