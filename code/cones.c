@@ -4,11 +4,19 @@
 #include <math.h>
 #include <memory.h>
 #include <time.h>
+#include <sys/time.h>
 
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_linalg.h>
 
-#define NUM_THREADS 16
+#define NUM_THREADS 8
+
+long long utime(void) {
+  //return time in microseconds
+  struct timeval tv;
+  gettimeofday(&tv,NULL);
+  return 1000000 * tv.tv_sec + tv.tv_usec;
+}
 
 vsamples_t *samples_to_vec(samples_t *samples) {
   size_t dimension = samples->dimension;
@@ -71,6 +79,7 @@ int is_zero_vec(gsl_vector *x) {
 }
 
 gsl_vector *apply_proj(const gsl_matrix *c, const gsl_vector *x) {
+  if(x == NULL) printf("x is NULL\n");
   gsl_vector *res = gsl_vector_calloc(x->size);
   gsl_blas_dgemv(CblasNoTrans, 1, c, x, 0, res);
   return res;
@@ -98,7 +107,40 @@ sparse_vector_t *copy_sparse_vector(sparse_vector_t *v) {
   return cp;
 }
 
-obj_result compute_obj(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c) {
+obj_result compute_obj_round(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c, round_pts_t *round_pts) {
+  size_t reach = 0, nfpos = 0;
+  size_t dimension = env->samples->dimension;
+  for(int i = 0; i < round_pts->n; i++) {
+    gsl_vector *cs;
+    if(c)
+      cs = apply_proj(c, round_pts->pts[i]);
+    else
+      cs = round_pts->pts[i];
+    double dot = 0;
+    gsl_blas_ddot(w, cs, &dot);
+    if(dot >= 1e-15) {
+      reach += round_pts->npos[i];
+      nfpos += round_pts->nneg[i];
+    }
+    if(c)
+      gsl_vector_free(cs);
+  }
+  double prec;
+  if(reach + nfpos == 0)
+    prec = 0;
+  else
+    prec = ((double) reach)/(reach + nfpos);
+
+  double violation = (env->params->theta - 1)*reach + env->params->theta*nfpos;
+  if(violation < 0)
+    violation = 0;
+  return (obj_result) {.obj = reach - violation * env->params->lambda, .prec = prec};
+}
+
+obj_result compute_obj(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c, round_pts_t *round_pts) {
+  if(round_pts)
+    return compute_obj_round(env, vs, w, c, round_pts);
+
   size_t reach = 0, nfpos = 0;
   size_t dimension = env->samples->dimension;
   for(size_t class = 0; class < env->samples->class_cnt; class++) {
@@ -214,8 +256,8 @@ gsl_vector *solve_exact_closed(env_t *env, vsamples_t *vs, size_t D, gsl_matrix 
     gsl_vector *v2 = gsl_vector_calloc(dimension);
     gsl_vector_axpby(-1, v1, 0, v2); 
     gsl_vector_free(u1);
-    double obj1 = compute_obj(env, vs, v1, c).obj;
-    double obj2 = compute_obj(env, vs, v2, c).obj;
+    double obj1 = compute_obj(env, vs, v1, c, NULL).obj;
+    double obj2 = compute_obj(env, vs, v2, c, NULL).obj;
     printf("obj1 = %g, obj2 = %g\n", obj1, obj2);
     if(obj1 > obj2) {
       gsl_vector_free(v2);
@@ -244,7 +286,7 @@ gsl_vector *solve_exact_closed(env_t *env, vsamples_t *vs, size_t D, gsl_matrix 
 	append(newV, class, i); //probably not a good idea to use sparse_vector for this; instead, use a regular vector and just store a pair*/
       gsl_matrix *newc = add_new_proj(c, u);
       gsl_vector *w = solve_exact_closed(env, vs, D-1, newc);
-      double obj = compute_obj(env, vs, w, c).obj; //this could be eliminated by returning the objective from this function as well as the hyperplane
+      double obj = compute_obj(env, vs, w, c, NULL).obj; //this could be eliminated by returning the objective from this function as well as the hyperplane
       if(obj > best_obj) {
 	best_obj = obj;
 	if(best_w != NULL)
@@ -431,13 +473,29 @@ gsl_vector *solve_exact_mixed(env_t *env, vsamples_t *vs, size_t D, gsl_matrix *
 
 void free_subproblem(subproblem_t *prob) {
   gsl_matrix_free(prob->c);
+  if(prob->m) {
+    for(int i = 0; i < 2; i++) {
+      free(prob->m[i]);
+    }
+    free(prob->m);
+  }
+  if(prob->need_recon) {
+    free(prob->need_recon);
+  }
   free(prob);
 }
 
-cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs, subproblem_t *prob, gsl_vector *best_w, pthread_mutex_t *prob_lock, round_pts_t *round_pts) {
+long long times[15];
+int runs = 0;
+
+cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs, subproblem_t *prob, gsl_vector *best_w, pthread_mutex_t *prob_lock, round_pts_t *round_pts, int id) {
   /** Solves a subproblem for the cones algorithm
    *  If it's a base case, returns the solution
    *  Otherwise, it adds its subproblems to the priority queue and returns NULL */
+  long long start = utime();
+  runs++;
+  int k = 0;
+  times[k++] += utime() - start;
   if(prob_lock) pthread_mutex_lock(prob_lock);
   gsl_matrix *c = prob->c;
   size_t D = prob->D;
@@ -445,10 +503,12 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
   //printf("Running, D = %lu\n", D);
   size_t dimension = vs->dimension;
   int all_zero = 1;
+  times[k++] = utime() - start;
 
   for(size_t class = 0; class < vs->class_cnt; class++) {
     for(size_t i = 0; i < vs->count[class]; i++) {
       gsl_vector *s = vs->samples[class][i];
+      //printf("class = %ld, idx = %ld\n", class, i);
       gsl_vector *cs = apply_proj(c, s);
       //gsl_vector *cs = apply_proj(c, vs->samples[class][i]);
       if(!is_zero_vec(cs)) {
@@ -464,6 +524,7 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
     printf("all zero\n");
     return (cones_result_t) {.obj = positives(env->samples), .w = gsl_vector_calloc(dimension)};
   }
+  times[k++] = utime() - start;
   if(D == 1) {
     gsl_vector *u1 = gsl_vector_calloc(dimension);
     gsl_vector_set_all(u1, 1);
@@ -471,8 +532,8 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
     gsl_vector *v2 = gsl_vector_calloc(dimension);
     gsl_vector_axpby(-1, v1, 0, v2); 
     gsl_vector_free(u1);
-    double obj1 = compute_obj(env, vs, v1, c).obj;
-    double obj2 = compute_obj(env, vs, v2, c).obj;
+    double obj1 = compute_obj(env, vs, v1, c, round_pts).obj;
+    double obj2 = compute_obj(env, vs, v2, c, round_pts).obj;
     //printf("obj1 = %g, obj2 = %g\n", obj1, obj2);
     if(obj1 > obj2) {
       gsl_vector_free(v2);
@@ -482,6 +543,7 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
       return (cones_result_t) {.obj = obj2, .w = v2};
     }
   }
+  times[k++] = utime() - start;
 
   double best_obj = -1e101;
   gsl_vector *best_proj_w = NULL;
@@ -504,7 +566,7 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
 	sub->c = newc;
 	sub->last_proj.class = class;
 	sub->last_proj.idx = i;
-	obj_result objres = compute_obj(env, vs, proj_w, newc);
+	obj_result objres = compute_obj(env, vs, proj_w, newc, NULL);
 	double obj = objres.obj;
 	double prec = objres.prec;
 	sub->score = obj;
@@ -516,6 +578,7 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
     }
   } else {
     for(int i = prob->last_proj.idx + 1; i < round_pts->n; i++) {
+      //printf("thread %d working\n", id);
       gsl_vector *u = apply_proj(c, round_pts->pts[i]);
       if(is_zero_vec(u)) {
 	gsl_vector_free(u);
@@ -528,7 +591,7 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
       sub->c = newc;
       sub->last_proj.class = -1;
       sub->last_proj.idx = i;
-      obj_result objres = compute_obj(env, vs, proj_w, newc);
+      obj_result objres = compute_obj(env, vs, proj_w, newc, round_pts);
       double obj = objres.obj;
       double prec = objres.prec;
       sub->score = obj;
@@ -540,34 +603,55 @@ cones_result_t solve_subproblem(env_t *env, vsamples_t *vs, prio_queue_t *probs,
       gsl_vector_free(u);
     }    
   }
+  times[k++] = utime() - start;
   return (cones_result_t) {.obj = best_obj, .w = best_proj_w};    
 }
 
 gsl_vector *solve_exact_closed_pq(env_t *env, vsamples_t *vs, prio_queue_t *probs, int n_round_pts) {
   size_t d = env->samples->dimension;
   double *h0 = best_random_hyperplane_unbiased(1, env);
+  //double *h0 = CALLOC(d, double);
   //double *h0 = best_random_hyperplane_proj(1, env);
   gsl_vector *best_w = gsl_vector_calloc(d);
   *best_w = gsl_vector_view_array(h0, d).vector;
-  double best_obj = compute_obj(env, vs, best_w, NULL).obj;
+  double best_obj = compute_obj(env, vs, best_w, NULL, NULL).obj;
   printf("Random hyperplane has obj %g\n", best_obj);
-  for(int i = 0; i <= d; i++) {
-    printf("%g%s", h0[i], i < d ? ", " : "\n");
+  for(int i = 0; i < d; i++) {
+    printf("%g%s", h0[i], i < d - 1 ? ", " : "\n");
   }
 
   round_pts_t *round_pts = NULL;
   vsamples_t *rvs = NULL;
   if(n_round_pts > 0) {
+    //rounded_pts_t rounded_pts = random_rounded_points(env, vs, n_round_pts);
+    rounded_pts_t rounded_pts = cluster_rounded_points_sep_classes(env, vs, n_round_pts);
+    //rounded_pts_t rounded_pts = cluster_rounded_points(env, vs, n_round_pts);
     round_pts = CALLOC(1, round_pts_t);
-    round_pts->n = n_round_pts;
-    //round_pts->pts = uniform_sphere_points(n_round_pts, d);
-    round_pts->pts = random_round_points(env, vs, n_round_pts);
-    rvs = create_rounded_vs(vs, round_pts);
+    memcpy(round_pts, &rounded_pts.round_pts, sizeof(round_pts_t));
+    rvs = rounded_pts.rvs;
+    /* *round_pts = random_round_points(env, vs, n_round_pts);
+    rvs = create_rounded_vs(vs, round_pts);*/
+  }
+  if(n_round_pts == -1) {
+    //choose # of clusters automatically
+    rounded_pts_t rounded_pts = cluster_rounded_points_consistent(env, vs);
+    round_pts = CALLOC(1, round_pts_t);
+    memcpy(round_pts, &rounded_pts.round_pts, sizeof(round_pts_t));
+    rvs = rounded_pts.rvs;
+    printf("formed %ld homogenous clusters, removing %ld points\n", round_pts->n, samples_total(env->samples)-round_pts->n);
   }
   vsamples_t *old_vs = vs;
   if(rvs)
     vs = rvs;
 
+  /*printf("Round pts:\n");
+  for(int i = 0; i < round_pts->n; i++) {
+    printf("(");
+    for(int j = 0; j < d; j++)
+      printf("%g%s", gsl_vector_get(round_pts->pts[i], j), j == d-1 ? "" : ", ");
+    printf(") => %d pos, %d neg\n", round_pts->npos[i], round_pts->nneg[i]);
+    }*/
+  
   time_t start_time = time(NULL);
   long probs_solved = 0;
   int time_int = 0;
@@ -582,7 +666,7 @@ gsl_vector *solve_exact_closed_pq(env_t *env, vsamples_t *vs, prio_queue_t *prob
       printf("[%ds] %ld subproblems solved\n", time_int, probs_solved);
     }
     subproblem_t *prob = prio_pop_max(probs);
-    cones_result_t res = solve_subproblem(env, vs, probs, prob, best_w, NULL, round_pts);
+    cones_result_t res = solve_subproblem(env, vs, probs, prob, best_w, NULL, round_pts, 0);
     probs_solved++;
     if(res.obj > best_obj) {
       printf("New best obj %g\n", res.obj);
@@ -596,6 +680,163 @@ gsl_vector *solve_exact_closed_pq(env_t *env, vsamples_t *vs, prio_queue_t *prob
     free_subproblem(prob);
   }
   //free(h0);
+  return best_w;
+}
+
+cones_result_t solve_subproblem_mixed(env_t *env, vsamples_t *vs, prio_queue_t *probs, subproblem_t *prob, gsl_vector *best_w) {
+  /** Solves a subproblem for the cones algorithm
+   *  If it's a base case, returns the solution
+   *  Otherwise, it adds its subproblems to the priority queue and returns NULL */
+  gsl_matrix *c = prob->c;
+  size_t D = prob->D;
+  int **m = prob->m;
+  //printf("Running, D = %lu\n", D);
+  size_t dimension = vs->dimension;
+  int all_zero = 1;
+
+  for(size_t class = 0; class < vs->class_cnt; class++) {
+    for(size_t i = 0; i < vs->count[class]; i++) {
+      gsl_vector *s = vs->samples[class][i];
+      gsl_vector *cs = apply_proj(c, s);
+      //gsl_vector *cs = apply_proj(c, vs->samples[class][i]);
+      if(!is_zero_vec(cs)) {
+	all_zero = 0;
+	gsl_vector_free(cs);
+	break;
+      }
+      gsl_vector_free(cs);
+    }
+    if(!all_zero) break;
+  }
+  if(all_zero) {
+    printf("all zero\n");
+    return (cones_result_t) {.obj = positives(env->samples), .w = gsl_vector_calloc(dimension)};
+  }
+
+  if(D == 1) {
+    gsl_vector *u1 = gsl_vector_calloc(dimension);
+    gsl_vector_set_all(u1, 1);
+    gsl_vector *v1 = apply_proj(c, u1);
+    gsl_vector *v2 = gsl_vector_calloc(dimension);
+    gsl_vector_axpby(-1, v1, 0, v2); 
+    gsl_vector_free(u1);
+    double obj1 = compute_obj_mixed(env, vs, v1, c, m).obj;
+    double obj2 = compute_obj_mixed(env, vs, v2, c, m).obj;
+    //printf("obj1 = %g, obj2 = %g\n", obj1, obj2);
+    if(obj1 > obj2) {
+      gsl_vector_free(v2);
+      return (cones_result_t) {.obj = obj1, .w = v1, .need_recon = prob->need_recon};
+    } else {
+      gsl_vector_free(v1);
+      return (cones_result_t) {.obj = obj2, .w = v2, .need_recon = prob->need_recon};
+    }
+  }
+
+  double best_obj = -1e101;
+  gsl_vector *best_proj_w = NULL;
+
+  for(size_t class = prob->last_proj.class; class < env->samples->class_cnt; class++) {
+    for(size_t i=prob->last_proj.idx+1; i < env->samples->count[class]; i++) {
+      gsl_vector *u = apply_proj(c, vs->samples[class][i]);
+      if(is_zero_vec(u)) {
+	gsl_vector_free(u);
+	continue;
+      }
+
+      gsl_matrix *newc = add_new_proj(c, u);
+      gsl_vector *proj_w = apply_proj(newc, best_w);
+      int **newm = build_new_m(vs, c, u, m);
+      subproblem_t *sub1 = CALLOC(1, subproblem_t);
+      sub1->D = D-1;
+      sub1->c = newc;
+      sub1->m = newm;
+      sub1->last_proj.class = class;
+      sub1->last_proj.idx = i;
+      obj_result objres1 = compute_obj_mixed(env, vs, proj_w, newc, newm);
+      double obj1 = objres1.obj;
+      sub1->score = obj1;
+      sub1->need_recon = CALLOC(vs->dimension, int);
+      memcpy(sub1->need_recon, prob->need_recon, vs->dimension*sizeof(int));
+      sub1->need_recon[D] = 1;
+      prio_enqueue(probs, sub1);
+
+      //need to copy m, since the old one will be freed
+      int **mcopy = CALLOC(vs->class_cnt, int *);
+      for(int k = 0; k < vs->class_cnt; k++) {
+	mcopy[k] = CALLOC(vs->count[k], int);
+	memcpy(mcopy[k], m[k], vs->count[k]*sizeof(int));
+      }
+
+      subproblem_t *sub2 = CALLOC(1, subproblem_t);
+      sub2->D = D-1;
+      sub2->c = newc;
+      sub2->m = m;
+      sub2->last_proj.class = class;
+      sub2->last_proj.idx = i;
+      obj_result objres2 = compute_obj_mixed(env, vs, proj_w, newc, m);
+      double obj2 = objres2.obj;
+      sub2->score = obj2;
+      sub2->need_recon = CALLOC(vs->dimension, int);
+      memcpy(sub2->need_recon, prob->need_recon, vs->dimension*sizeof(int));
+      sub2->need_recon[D] = -1;
+      prio_enqueue(probs, sub2);
+      
+      gsl_vector_free(u);
+    }
+  }
+  return (cones_result_t) {.obj = -1e101, .w = best_proj_w};    
+}
+
+gsl_vector *solve_exact_open_pq(env_t *env, vsamples_t *vs, prio_queue_t *probs) {
+  size_t d = env->samples->dimension;
+  double *h0 = best_random_hyperplane_unbiased(1, env);
+  //double *h0 = best_random_hyperplane_proj(1, env);
+  gsl_vector *best_w = gsl_vector_calloc(d);
+  *best_w = gsl_vector_view_array(h0, d).vector;
+  double best_obj = compute_obj(env, vs, best_w, NULL, NULL).obj;
+  printf("Random hyperplane has obj %g\n", best_obj);
+  for(int i = 0; i <= d; i++) {
+    printf("%g%s", h0[i], i < d ? ", " : "\n");
+  }
+
+  time_t start_time = time(NULL);
+  long probs_solved = 0;
+  int time_int = 0;
+  int *best_need_recon = CALLOC(d, int);
+  
+  while(prio_get_n(probs) > 0) {
+    time_t curr_time = time(NULL);
+    double dtime = difftime(curr_time, start_time);
+    if(dtime > 120)
+      break;
+    if((int) dtime > time_int) {
+      time_int = (int) dtime;
+      printf("[%ds] %ld subproblems solved\n", time_int, probs_solved);
+    }
+    printf("about to pop\n");
+    subproblem_t *prob = prio_pop_max(probs);
+    printf("popped\n");
+    cones_result_t res = solve_subproblem_mixed(env, vs, probs, prob, best_w);
+    printf("fathomed\n");
+    probs_solved++;
+    if(res.obj > best_obj) {
+      printf("New best obj %g\n", res.obj);
+      if(best_w)
+	gsl_vector_free(best_w);
+      if(best_need_recon)
+	free(best_need_recon);
+      best_obj = res.obj;
+      best_w = res.w;
+      memcpy(best_need_recon, res.need_recon, d*sizeof(int));
+    } else {
+      gsl_vector_free(res.w);
+    }
+    printf("done with if\n");
+    free_subproblem(prob);
+    printf("freed\n");
+  }
+  
+  //TODO: reconstruct w from need_recon
   return best_w;
 }
 
@@ -616,6 +857,10 @@ typedef struct subprob_thread_t {
   pthread_cond_t *wait_cond;
   pthread_t *thread;
   int id;
+  time_t start_time;
+  int *time_int;
+  pthread_mutex_t *time_lock;
+  long long *tot_time;
 } subprob_thread_t;
 
 void *subproblem_worker(void *args) {
@@ -624,6 +869,18 @@ void *subproblem_worker(void *args) {
     pthread_mutex_lock(a->wait_lock);
     *a->waiting = 1;
     pthread_mutex_unlock(a->wait_lock);
+
+    pthread_mutex_lock(a->time_lock);
+    time_t curr_time = time(NULL);
+    double dt = difftime(curr_time, a->start_time);
+    if((int) dt > *a->time_int) {
+      *a->time_int = (int) dt;
+      pthread_mutex_lock(a->obj_lock);
+      printf("[%ds] %d subproblems solved. Spent %gs solving subproblems\n", (int) dt, *a->n_probs, *a->tot_time/1000000.);
+      *a->tot_time = 0;
+      pthread_mutex_unlock(a->obj_lock);
+    }
+    pthread_mutex_unlock(a->time_lock);
     
     pthread_mutex_lock(a->prob_lock);
     while(prio_get_n(a->probs) == 0 && !(*a->stop)) {
@@ -631,15 +888,23 @@ void *subproblem_worker(void *args) {
     }
     pthread_mutex_lock(a->wait_lock);
     *a->waiting = 0;
-    pthread_cond_signal(a->wait_cond);
+    //This if statement improves speed, but the algorithm will not terminate before 120s, even if the prio queue is emptied
+    //TODO: find a better way
+    if(dt > 120) 
+      pthread_cond_signal(a->wait_cond);
     pthread_mutex_unlock(a->wait_lock);
     
     if(*a->stop)
       break;
     subproblem_t *prob = prio_pop_max(a->probs);
     pthread_mutex_unlock(a->prob_lock);
-    
-    cones_result_t res = solve_subproblem(a->env, a->vs, a->probs, prob, a->best_w,a->prob_lock, a->round_pts);
+
+    long long start_time = utime();
+    cones_result_t res = solve_subproblem(a->env, a->vs, a->probs, prob, a->best_w,a->prob_lock, a->round_pts, a->id);
+    long long end_time = utime();
+    if(end_time < start_time)
+      printf("what\n");
+    long long elapsed = utime() - start_time;
     
     pthread_mutex_lock(a->prob_lock);
     pthread_cond_signal(a->prob_cond);
@@ -647,6 +912,7 @@ void *subproblem_worker(void *args) {
 
     pthread_mutex_lock(a->obj_lock);
     *a->n_probs += 1;
+    *a->tot_time += elapsed;
     if(res.obj > *a->best_obj) {
       printf("[T%d] New best solution with objective %g\n", a->id, res.obj);
       gsl_vector_memcpy(a->best_w, res.w);
@@ -675,7 +941,7 @@ gsl_vector *solve_exact_closed_pq_mt2(env_t *env, vsamples_t *vs, prio_queue_t *
   //double *h0 = CALLOC(d, double);
   gsl_vector *best_w = gsl_vector_calloc(d);
   *best_w = gsl_vector_view_array(h0, d).vector;
-  double best_obj = compute_obj(env, vs, best_w, NULL).obj;
+  double best_obj = compute_obj(env, vs, best_w, NULL, NULL).obj;
   printf("Random hyperplane has obj %g\n", best_obj);
   for(int i = 0; i <= d; i++) {
     printf("%g%s", h0[i], i < d ? ", " : "\n");
@@ -685,9 +951,7 @@ gsl_vector *solve_exact_closed_pq_mt2(env_t *env, vsamples_t *vs, prio_queue_t *
   vsamples_t *rvs = NULL;
   if(n_round_pts > 0) {
     round_pts = CALLOC(1, round_pts_t);
-    round_pts->n = n_round_pts;
-    //round_pts->pts = uniform_sphere_points(n_round_pts, d);
-    round_pts->pts = random_round_points(env, vs, n_round_pts);
+    *round_pts = random_round_points(env, vs, n_round_pts);
     rvs = create_rounded_vs(vs, round_pts);
   }
   vsamples_t *old_vs = vs;
@@ -705,11 +969,14 @@ gsl_vector *solve_exact_closed_pq_mt2(env_t *env, vsamples_t *vs, prio_queue_t *
   pthread_mutex_init(&wait_lock, NULL);
   pthread_cond_t wait_cond;
   pthread_cond_init(&wait_cond, NULL);
+  pthread_mutex_t time_lock;
+  pthread_mutex_init(&time_lock, NULL);
 
   double *best_obj_univ = CALLOC(1, double);
   *best_obj_univ = best_obj;
   int *n_probs = CALLOC(1, int);
-  
+  int *time_int = CALLOC(1, int);
+  long long *tot_time = CALLOC(1, long long);
 
   for(int i = 0; i < NUM_THREADS; i++) {
     workers[i].env = env;
@@ -728,11 +995,13 @@ gsl_vector *solve_exact_closed_pq_mt2(env_t *env, vsamples_t *vs, prio_queue_t *
     workers[i].wait_cond = &wait_cond;
     workers[i].thread = CALLOC(1, pthread_t);
     workers[i].id = i;
+    workers[i].start_time = time(NULL);
+    workers[i].time_lock = &time_lock;
+    workers[i].time_int = time_int;
+    workers[i].tot_time = tot_time;
     pthread_create(workers[i].thread, NULL, subproblem_worker, &workers[i]);
   }
 
-  time_t start_time = time(NULL);
-  int time_int = 0;
   
   //wait until all threads are done and prio queue is empty
   pthread_mutex_lock(&wait_lock);
@@ -740,14 +1009,6 @@ gsl_vector *solve_exact_closed_pq_mt2(env_t *env, vsamples_t *vs, prio_queue_t *
   while(prio_get_n(probs) > 0 || !all_waiting(workers)) {
     //printf("main thread waiting\n");
     pthread_cond_wait(&wait_cond, &wait_lock);
-    time_t curr_time = time(NULL);
-    double dtime = difftime(curr_time, start_time);
-    if((int) dtime > time_int) {
-      time_int = (int) dtime;
-      pthread_mutex_lock(&obj_lock);
-      printf("[%ds] %d subproblems solved\n", time_int, *n_probs);
-      pthread_mutex_unlock(&obj_lock);
-    }
   }
   //now, all threads are done, so tell them to stop
   printf("# unsolved probs = %ld. All waiting? %d\n", prio_get_n(probs), all_waiting(workers));
@@ -790,7 +1051,7 @@ typedef struct subprob_args_t {
 void *solve_subproblem_mt(void *args) {
   subprob_args_t *a = args;
   printf("about to solve subproblem\n");
-  cones_result_t res = solve_subproblem(a->env, a->vs, a->probs, a->prob, a->best_w, NULL, a->round_pts);
+  cones_result_t res = solve_subproblem(a->env, a->vs, a->probs, a->prob, a->best_w, NULL, a->round_pts, 0);
   printf("solved\n");
   memcpy(a->res, &res, sizeof(res));
   pthread_mutex_t *lock = a->completed_lock;
@@ -813,7 +1074,7 @@ gsl_vector *solve_exact_closed_pq_mt(env_t *env, vsamples_t *vs, prio_queue_t *p
   //double *h0 = best_random_hyperplane_proj(1, env);
   gsl_vector *best_w = gsl_vector_calloc(d);
   *best_w = gsl_vector_view_array(h0, d).vector;
-  double best_obj = compute_obj(env, vs, best_w, NULL).obj;
+  double best_obj = compute_obj(env, vs, best_w, NULL, NULL).obj;
   printf("Random hyperplane has obj %g\n", best_obj);
   for(int i = 0; i <= d; i++) {
     printf("%g%s", h0[i], i < d ? ", " : "\n");
@@ -823,9 +1084,7 @@ gsl_vector *solve_exact_closed_pq_mt(env_t *env, vsamples_t *vs, prio_queue_t *p
   vsamples_t *rvs = NULL;
   if(n_round_pts > 0) {
     round_pts = CALLOC(1, round_pts_t);
-    round_pts->n = n_round_pts;
-    //round_pts->pts = uniform_sphere_points(n_round_pts, d);
-    round_pts->pts = random_round_points(env, vs, n_round_pts);
+    *round_pts = random_round_points(env, vs, n_round_pts);
     rvs = create_rounded_vs(vs, round_pts);
   }
   vsamples_t *old_vs = vs;
@@ -936,7 +1195,7 @@ double *single_exact_run(env_t *env, int n_round_pts) {
   vsamples_t *vs = samples_to_vec(env->samples);
   //gsl_vector *w = solve_exact_closed(env, vs, env->samples->dimension, c);
 
-  prio_queue_t *probs = create_prio_queue(1);
+  prio_queue_t *probs = create_prio_queue(0);
   subproblem_t *base = CALLOC(1, subproblem_t);
   base->D = dimension;
   base->c = c;
@@ -944,9 +1203,12 @@ double *single_exact_run(env_t *env, int n_round_pts) {
   base->last_proj.class = 0;
   base->last_proj.idx = -1;
   prio_enqueue(probs, base);
-  gsl_vector *w = solve_exact_closed_pq_mt2(env, vs, probs, n_round_pts);
+  gsl_vector *w = solve_exact_closed_pq(env, vs, probs, n_round_pts);
+  printf("times: ");
+  for(int i = 0; i < 10; i++)
+    printf("%lld%s", times[i], i == 9 ? "\n" : " ");
   //gsl_vector *w = solve_exact_closed(env, vs, dimension, c);
-  printf("obj = %g\n", compute_obj(env, vs, w, NULL).obj);
+  printf("obj = %g\n", compute_obj(env, vs, w, NULL, NULL).obj);
   double *h = CALLOC(dimension, double);
   for(size_t i = 0; i < dimension; i++)
     h[i] = gsl_vector_get(w, i);
@@ -970,9 +1232,20 @@ double *single_exact_run_open(env_t *env) {
     }
   }
 
+  prio_queue_t *probs = create_prio_queue(1);
+  subproblem_t *base = CALLOC(1, subproblem_t);
+  base->D = dimension;
+  base->c = c;
+  base->score = 1;
+  base->last_proj.class = 0;
+  base->last_proj.idx = -1;
+  base->m = m;
+  base->need_recon = CALLOC(dimension, int);
+  prio_enqueue(probs, base);
+
   
-  gsl_vector *w = solve_exact_mixed(env, vs, env->samples->dimension, c, m);
-  printf("obj = %g\n", compute_obj(env, vs, w, NULL).obj);
+  gsl_vector *w = solve_exact_open_pq(env, vs, probs);
+  printf("obj = %g\n", compute_obj(env, vs, w, NULL, NULL).obj);
   double *h = CALLOC(dimension, double);
   for(size_t i = 0; i < dimension; i++)
     h[i] = gsl_vector_get(w, i);
@@ -981,11 +1254,7 @@ double *single_exact_run_open(env_t *env) {
   return h;
 }
 
-struct rand_proj_res {
-  gsl_vector *w;
-  gsl_matrix *c;
-  int *indices;
-} best_random_proj(int initial, env_t *env) {
+struct rand_proj_res best_random_proj(int initial, env_t *env) {
   params_t *params = env->params;
   int rnd_trials = initial ? params->rnd_trials : params->rnd_trials_cont;
   if (!rnd_trials) {
@@ -1007,21 +1276,23 @@ struct rand_proj_res {
     int *pts = CALLOC(d-1, int);
     for(int i = 0; i < d-1; i++) {
       //generate the d - 1 random indices
-      //TODO: find a better way to do this (maybe a library function
-      int repeat;
+      //TODO: find a better way to do this (maybe a library function)
+      int repeat, newpt;
       do {
 	repeat = 0;
-	int newpt = gsl_rng_uniform_int(r, env->samples->dimension);
+	newpt = gsl_rng_uniform_int(r, samples_total(env->samples));
 	for(int j = 0; j < i; j++) {
-	  if(pts[i] == newpt) {
+	  if(pts[j] == newpt) {
 	    repeat = 1;
 	    break;
 	  }
 	}
       } while(repeat);
+      pts[i] = newpt;
     }
 
-    gsl_matrix *c = gsl_matrix_alloc(d, d);
+
+    /*gsl_matrix *c = gsl_matrix_alloc(d, d);
     for(size_t i = 0; i < d; i++)
       gsl_matrix_set(c, i, i, 1);
     for(int i = 0; i < d-1; i++) {
@@ -1038,8 +1309,13 @@ struct rand_proj_res {
     gsl_vector *v2 = gsl_vector_calloc(d);
     gsl_vector_axpby(-1, v1, 0, v2); 
     gsl_vector_free(u1);
-    double obj1 = compute_obj(env, vs, v1, c).obj;
-    double obj2 = compute_obj(env, vs, v2, c).obj;
+    double obj1 = compute_obj(env, vs, v1, c, NULL).obj;
+    double obj2 = compute_obj(env, vs, v2, c, NULL).obj;*/
+    gsl_vector *v1 = get_proj_basis_idxs(env, vs, pts);
+    gsl_vector *v2 = gsl_vector_calloc(d);
+    gsl_vector_axpby(-1, v1, 0, v2); 
+    double obj1 = compute_obj(env, vs, v1, NULL, NULL).obj;
+    double obj2 = compute_obj(env, vs, v2, NULL, NULL).obj;
     //printf("obj1 = %g, obj2 = %g\n", obj1, obj2);
 
     gsl_vector *w;
@@ -1061,11 +1337,11 @@ struct rand_proj_res {
       }
       best_hyperplane = w;
       best_value = obj;
-      best_c = c;
+      best_c = NULL; //TODO: when I moved to QR fac, we no longer keep c
       best_pts = pts;
     } else {
       gsl_vector_free(w);
-      gsl_matrix_free(c);
+      gsl_matrix_free(NULL);
       free(pts);
     }
   }
@@ -1109,3 +1385,15 @@ gsl_vector *get_proj_basis(env_t *env, gsl_vector **V) {
   gsl_matrix_free(R);
   return v;
 }
+
+gsl_vector *get_proj_basis_idxs(env_t *env, vsamples_t *vs, int *idxs) {
+  size_t d = env->samples->dimension;
+  gsl_vector **V = CALLOC(d-1, gsl_vector *);
+  for(int i = 0; i < d-1; i++) {
+    sample_locator_t *loc = locator(idxs[i]+d+2, env->samples);
+    V[i] = vs->samples[loc->class][loc->index];
+    free(loc);
+  }
+  return get_proj_basis(env, V);
+}
+

@@ -32,6 +32,7 @@ typedef struct gurobi_param {
   int VarBranch;
   double Heuristics;
   int Cuts;
+  int method; //0 for milp, 1 for qp, 2 for cones
 } gurobi_param;
 
 /** Launch a single experiment 
@@ -75,7 +76,11 @@ sys7_t *generate_fixedpt_mat(env_t *env, double *rel_sol);
 
 void *compute_inseparabilities(env_t *, int);
 
-int add_gurobi_hyperplane(GRBmodel *, size_t);
+int add_gurobi_hyperplane(GRBmodel *, size_t, int);
 int add_gurobi_sample_var(GRBmodel *, int, char *);
 int error_handle(int state, GRBmodel *model, char *step);
 double *single_gurobi_cones_run(unsigned int *, int, int, env_t *);
+
+GRBmodel *gurobi_milp_unbiased(int *, const env_t *);
+GRBmodel *gurobi_qp(int *, const env_t *);
+GRBmodel *gurobi_cones_miqp(int *, const env_t *);

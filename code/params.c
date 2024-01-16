@@ -15,5 +15,6 @@ params_t *params_default() {
 	params->iheur_method = simple;
     params->rnd_trials = 0;
     params->rnd_trials_cont = 0;
+    params->epsilon_prob = 0.05;
 	return params;
 }

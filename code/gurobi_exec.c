@@ -126,8 +126,24 @@ double *single_gurobi_run(unsigned int *seed,
 
     int state;
     GRBmodel *model;
-    
-    TRY_MODEL(model = gurobi_milp(&state, env), "model creation");
+
+    switch(param_setting->method) {
+    case 0:
+      TRY_MODEL(model = gurobi_milp(&state, env), "model creation");
+      break;
+    case 1:
+      TRY_MODEL(model = gurobi_qp(&state, env), "model creation");
+      break;
+    case 2:
+      TRY_MODEL(model = gurobi_cones_miqp(&state, env), "model creation");
+      break;
+    case 3:
+      TRY_MODEL(model = gurobi_milp_unbiased(&state, env), "model creation");
+      break;
+    default:
+      printf("invalid method\n");
+      return NULL;
+    }
 
     TRY_MODEL(state = GRBsetstrparam(GRBgetenv(model), "LogFile", "gurobi_log.log"), "set log file");
 
@@ -164,7 +180,7 @@ double *single_gurobi_run(unsigned int *seed,
       state = GRBsetdblparam(GRBgetenv(model), 
                              "TimeLimit", 
                              tm_lim / 1000.),
-      "set time limit")
+      "set time limit");
 
       /*GRBwrite(model, "pre.prm"); //save params before tuning
 
@@ -172,28 +188,71 @@ double *single_gurobi_run(unsigned int *seed,
     int nresults;
     TRY_MODEL(state = GRBgetintattr(model, "TuneResultCount", &nresults), "get tune results");
     if(nresults > 0)
-      TRY_MODEL(state = GRBgettuneresult(model, 0), "apply tuning");
-      GRBwrite(model, "post.prm");*/
-    
-    printf("Generating best of %d hyperplanes\n", env->params->rnd_trials);
-    double *h = best_random_hyperplane_proj(1, env);
-    //double *h = single_exact_run(env);
-    printf("Dimension = %lu\n", env->samples->dimension);
-    //for(int i = 0; i < env->samples->dimension+1; i++) h[i] /= 100;
-    //printf("Hyperplane: %0.3f %0.3f %0.3f %0.3f\n", h[0], h[1], h[2], h[3]);
-    printf("Hyperplane: ");
-    for(int i = 0; i < env->samples->dimension+1; i++)
-      printf("%0.3f%s", h[i], (i == env->samples->dimension) ? "\n" : " ");
-    printf("Done, printing solution:\n");
-    double *random_solution = blank_solution(samples);
-    double random_objective_value = hyperplane_to_solution(h, random_solution, env);
-    printf("Objective value = %0.3f\n", random_objective_value);
-    printf("Precision = %lg, reach = %u\n", precision(random_solution, samples), reach(random_solution, samples));
+    TRY_MODEL(state = GRBgettuneresult(model, 0), "apply tuning");
+    GRBwrite(model, "post.prm");*/
+    if(param_setting->method == 2) {
+      struct rand_proj_res res = best_random_proj(1, env);
+      size_t d = env->samples->dimension;
+      int n = samples_total(samples);
+      int v_start = violation_idx(0, samples);
+      double *random_solution_v = CALLOC(n, double);
+      for(int j = 0; j < n; j++)
+	random_solution_v[j] = 1;
+      for(int j = 0; j < d-1; j++) {
+	random_solution_v[res.indices[j]] = 0;
+      }
 
-    TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, nvars-env->samples->dimension-1, random_solution + env->samples->dimension+2), "set start");
+      double *h = CALLOC(d, double);
+      for(size_t i = 0; i < d; i++) {
+	h[i] = gsl_vector_get(res.w, i);
+      }
+      double *random_solution_hplane = blank_solution(samples);
+      double random_objective_value = hyperplane_to_solution(h, random_solution_hplane, env);
+      printf("Objective value = %g\n", random_objective_value);
 
-    free(h);
-    free(random_solution);
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0, samples_total(samples)+d+1, random_solution_hplane+1), "set start hyperplane");
+      //TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, samples_total(samples), random_solution_hplane + env->samples->dimension+2), "set start xs and ys");
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, v_start, n, random_solution_v), "set start vs");
+    } else if (param_setting->method == 3) {
+      env->params->epsilon_positive = 0;
+      env->params->epsilon_negative = 0;
+      gurobi_param p = {0, 0, 0, GRB_INFINITY, -1, 0.15, -1, 2};
+      double *h = single_gurobi_run(seed, 5000, 1200, env, &p);
+      printf("Hyperplane: ");
+      for(int i = 0; i < env->samples->dimension+1; i++)
+	printf("%0.3f%s", h[i], (i == env->samples->dimension) ? "\n" : " ");
+
+      double *random_solution = blank_solution(samples);
+      double random_objective_value = hyperplane_to_solution(h+1, random_solution, env);
+      printf("Objective value = %0.3f\n", random_objective_value);
+      printf("Precision = %lg, reach = %u\n", precision(random_solution, samples), reach(random_solution, samples));
+      printf("h: Precision = %lg, reach = %u\n", precision(h, samples), reach(h, samples));
+
+      //TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, samples_total(samples), random_solution + env->samples->dimension+2), "set start");
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0, samples_total(samples), h+1), "set start");
+      //env->params = params_default();
+    } else {
+      printf("Generating best of %d hyperplanes\n", env->params->rnd_trials);
+      double *h = best_random_hyperplane(1, env);
+      //double *h = CALLOC(env->samples->dimension+1, double);
+      //double *h = single_exact_run(env);
+      printf("Dimension = %lu\n", env->samples->dimension);
+      //for(int i = 0; i < env->samples->dimension+1; i++) h[i] /= 100;
+      //printf("Hyperplane: %0.3f %0.3f %0.3f %0.3f\n", h[0], h[1], h[2], h[3]);
+      printf("Hyperplane: ");
+      for(int i = 0; i < env->samples->dimension+1; i++)
+	printf("%0.3f%s", h[i], (i == env->samples->dimension) ? "\n" : " ");
+      printf("Done, printing solution:\n");
+      double *random_solution = blank_solution(samples);
+      double random_objective_value = hyperplane_to_solution(h, random_solution, env);
+      printf("Objective value = %0.3f\n", random_objective_value);
+      printf("Precision = %lg, reach = %u\n", precision(random_solution, samples), reach(random_solution, samples));
+
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, samples_total(samples), random_solution + env->samples->dimension+2), "set start");
+
+      free(h);
+      free(random_solution);
+    }
 
     //TRY_MODEL(state = GRBsetcallbackfunc(model, gurobi_callback, env), "set callback");
     
@@ -267,7 +326,7 @@ double *single_gurobi_run(unsigned int *seed,
     for(int i = 0; i < nvars; i++)
     printf("%0.3f%s", result[i], (i == nvars - 1) ? "\n" : " ");*/
 
-    GRBwrite(model, "soln.sol");
+    GRBwrite(model, "soln.json");
 
     GRBfreeenv(GRBgetenv(model));
     GRBfreemodel(model);

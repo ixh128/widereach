@@ -1,6 +1,6 @@
 #include "widereach.h"
 #include "helper.h"
-#include <string.h>
+#include <memory.h>
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_randist.h>
 #include <math.h>
@@ -209,6 +209,7 @@ void add_bias(samples_t *samples) {
     }
   }
   samples->dimension++;
+  printf("in add_bias: %ld\n", samples->dimension);
 }
 
 void normalize_samples(samples_t *samples) {
@@ -244,11 +245,11 @@ gsl_vector **uniform_sphere_points(size_t n, size_t d) {
   return pts;
 }
 
-gsl_vector **random_round_points(env_t *env, vsamples_t *vs, size_t n) {
+round_pts_t random_round_points(env_t *env, vsamples_t *vs, size_t n) {
   size_t d = env->samples->dimension;
   if(n > samples_total(env->samples)) {
     printf("ERR: too many round pts\n");
-    return NULL;
+    return (round_pts_t) {0};
   }
   int *taken_pts = CALLOC(samples_total(env->samples), int); //=1 if taken, 0 otherwise
   gsl_rng *r = gsl_rng_alloc(gsl_rng_taus);
@@ -275,7 +276,7 @@ gsl_vector **random_round_points(env_t *env, vsamples_t *vs, size_t n) {
   
   gsl_rng_free(r);
   free(taken_pts);
-  return pts;
+  return (round_pts_t) {n, pts};
 }
 
 vsamples_t *create_rounded_vs(vsamples_t *vs, round_pts_t *round_pts) {
@@ -289,6 +290,10 @@ vsamples_t *create_rounded_vs(vsamples_t *vs, round_pts_t *round_pts) {
   rvs->label = CALLOC(vs->class_cnt, int);
   memcpy(rvs->label, vs->label, vs->class_cnt*sizeof(int));
   rvs->samples = CALLOC(vs->class_cnt, gsl_vector **);
+
+  round_pts->npos = CALLOC(n, int);
+  round_pts->nneg = CALLOC(n, int);
+  
   for(int class = 0; class < vs->class_cnt; class++) {
     rvs->samples[class] = CALLOC(rvs->count[class], gsl_vector *);
     for(int i = 0; i < vs->count[class]; i++) {
@@ -306,7 +311,16 @@ vsamples_t *create_rounded_vs(vsamples_t *vs, round_pts_t *round_pts) {
 	}
       }
       gsl_vector_memcpy(rvs->samples[class][i], round_pts->pts[closest_idx]);
+      if(vs->label[class] == 1)
+	round_pts->npos[closest_idx]++;
+      else
+	round_pts->nneg[closest_idx]++;
     }
   }
   return rvs;
+}
+
+rounded_pts_t random_rounded_points(env_t *env, vsamples_t *vs, size_t n) {
+  round_pts_t round_pts = random_round_points(env, vs, n);
+  return (rounded_pts_t) {round_pts, create_rounded_vs(vs, &round_pts)};
 }

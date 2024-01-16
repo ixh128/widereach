@@ -227,7 +227,7 @@ void feature_scaling(env_t *env) {
     size_t cnt = env->samples->count[c];
     for(int d = 0; d < dim; d++) {
       if(norms[d] == 0){
-	printf("Found norm 0 in feature scaling\n");
+	printf("Found norm 0 on dimension %d\n", d);
 	continue;
       }
                   
@@ -274,7 +274,7 @@ exp_res_t experiment(int param_setting) {
     double lambda_factor = 10;
     env.params->branch_target = 0.0;
     env.params->iheur_method = deep;
-    int n = 40;
+    int n = 20;
     // env.params->lambda = 100 * (n + 1); 
     env.params->rnd_trials = 10000;
     // env.params->rnd_trials_cont = 10;
@@ -355,7 +355,7 @@ exp_res_t experiment(int param_setting) {
         printf("Sample seed: %lu\n", samples_seeds[s]);
     
         samples_t *samples;
-        //samples = random_samples(n, n / 2, dimension);
+	//samples = random_samples(n, n / 2, dimension);
         //samples = random_sample_clusters(clusters);
 	//samples = random_simplex_samples(&simplex_info);
         infile =
@@ -376,9 +376,19 @@ exp_res_t experiment(int param_setting) {
 	  //fopen("../../data/breast-cancer/wdbc.dat", "r");
 	  //fopen("../../data/wine-quality/red-cross/winequality-red.dat", "r");
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1.dat", "r");
-	  //fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
+	  fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
 	  //fopen("../../data/crops/small-sample.dat", "r");
-	  fopen("../../data/south-german-credit/SouthGermanCredit_pca4.dat", "r");
+	  //PCA (d=5):
+	  //fopen("../../data/breast-cancer/wdbc.dat", "r");
+	  //fopen("../../data/wine-quality/red-cross/winequality-red.dat", "r");
+	  //fopen("../../data/wine-quality/white-cross/winequality-white-1_pca5.dat", "r");
+	  //fopen("../../data/south-german-credit/SouthGermanCredit_pca5.dat", "r");
+	  //fopen("../../data/crops/small-sample_pca5.dat", "r");
+	  //generated datasets:
+	  //fopen("../../instance_generation/instance_1.dat", "r");
+	  //fopen("../../instance_generation/instance_1_pca15.dat", "r");
+	  //fopen("../../instance_generation/instance_3.dat", "r");
+	  //fopen("../../instance_generation/instance_3_pca15.dat", "r");
 	samples = read_binary_samples(infile);
 	fclose(infile);
 	//write_samples(samples, "2cluster4000.dat");
@@ -386,11 +396,13 @@ exp_res_t experiment(int param_setting) {
 
 	//print_samples(samples);
 
-        env.samples = samples;
-	add_bias(samples);
-	feature_scaling(&env);
-	normalize_samples(samples);
-	//print_samples(samples);
+	env.samples = samples;
+
+	//add_bias(samples);
+	//feature_scaling(&env);
+	//normalize_samples(samples);
+	//env.samples = samples;
+	//	print_samples(samples);
         n = samples_total(samples);
         env.params->lambda = lambda_factor * (n + 1);
 	env.params->epsilon_precision = 3./990;
@@ -432,10 +444,13 @@ exp_res_t experiment(int param_setting) {
 	    }
 	    exit(0);*/
 
+	    /*printf("insep = %g\n", insep_score_euclid(&env));
+	      exit(0);*/
+
 	    //double *h = single_gurobi_cones_run(seed, 120000, 1200, &env);
 	    //Training results testing:
 	    if(param_setting <= 0) {
-	      double *h = single_exact_run(&env, 100);
+	      double *h = single_exact_run(&env, 900);
 	      double obj = hyperplane_to_solution(h, NULL, &env);
 	      printf("Solved. Obj = %g\n", obj);
 	      printf("Hyperplane: ");
@@ -444,7 +459,9 @@ exp_res_t experiment(int param_setting) {
 	      exit(0);
 	    } else if(param_setting == 1) {
 	      //use gurobi
-	      gurobi_param p = {param_setting, 0, 0, GRB_INFINITY, -1, 0.15, -1};
+	      /*env.params->epsilon_positive = 0;
+		env.params->epsilon_negative = 0;*/
+	      gurobi_param p = {0, 0, 0, GRB_INFINITY, -1, 0.15, -1, 0};
 	      h = single_gurobi_run(seed, 120000, 1200, &env, &p);
 	      //h = single_siman_run(seed, 0, &env, h+1);
 	      printf("Objective = %0.3f\n", h[0]);
@@ -469,6 +486,8 @@ exp_res_t experiment(int param_setting) {
 	    for(int i = 1; i <= env.samples->dimension + 1; i++)
 	      printf("%0.5f%s", h[i], (i == env.samples->dimension + 1) ? "\n" : " ");
 	    //printf("Objective value: %0.3f\n", h[0]);
+
+	    env.params = params_default();
 
 	    reaches[k] = reach(h, env.samples);
 	    precisions[k] = precision(h, env.samples);

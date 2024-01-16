@@ -10,7 +10,7 @@
 #define N_TRIES 200 /* how many points do we try before stepping */
 #define ITERS_FIXED_T 2000 /* how many iterations for each T? */
 #define STEP_SIZE 10000.0 /* max step size in random walk */
-#define K 1.0 /* Boltzmann constant */
+#define K 10.0 /* Boltzmann constant */
 #define T_INITIAL 1.0 /* initial temperature */
 #define MU_T 1.003 /* damping factor for temperature */
 #define T_MIN 0.1 // NOTE: changed
@@ -23,17 +23,6 @@ void add_new_proj_ip(gsl_matrix *c, const gsl_vector *x) {
   double denom;
   gsl_blas_ddot(x, x, &denom);
   gsl_blas_dger(-1/denom, x, x, c);
-}
-
-gsl_vector *get_proj_basis_idxs(env_t *env, int *idxs) {
-  size_t d = env->samples->dimension;
-  gsl_vector **V = CALLOC(d-1, gsl_vector *);
-  for(int i = 0; i < d-1; i++) {
-    sample_locator_t *loc = locator(idxs[i]+d+2, env->samples);
-    V[i] = vs->samples[loc->class][loc->index];
-    free(loc);
-  }
-  return get_proj_basis(env, V);
 }
 
 double cones_energy(void *xp) {
@@ -72,11 +61,11 @@ double cones_energy(void *xp) {
   //printf("obj1 = %g, obj2 = %g\n", obj1, obj2);
   gsl_matrix_free(c);*/
   
-  gsl_vector *v1 = get_proj_basis_idxs(env, idxs);
+  gsl_vector *v1 = get_proj_basis_idxs(env, vs, idxs);
   gsl_vector *v2 = gsl_vector_calloc(d);
   gsl_vector_axpby(-1, v1, 0, v2); 
-  double obj1 = compute_obj(env, vs, v1, NULL).obj;
-  double obj2 = compute_obj(env, vs, v2, NULL).obj;
+  double obj1 = compute_obj(env, vs, v1, NULL, NULL).obj;
+  double obj2 = compute_obj(env, vs, v2, NULL, NULL).obj;
  
   if(obj1 > obj2) {
     gsl_vector_free(v2);
@@ -166,8 +155,8 @@ double siman_cones_dist(void *xp, void *yp) {
       dist++;
   }
   return dist;*/
-  gsl_vector *v1 = get_proj_basis_idxs(env, idxs1);
-  gsl_vector *v2 = get_proj_basis_idxs(env, idxs2);
+  gsl_vector *v1 = get_proj_basis_idxs(env, vs, idxs1);
+  gsl_vector *v2 = get_proj_basis_idxs(env, vs, idxs2);
   double dot;
   gsl_blas_ddot(v1, v2, &dot);
   double theta = acos(dot / (gsl_blas_dnrm2(v1)*gsl_blas_dnrm2(v2)));
@@ -202,7 +191,7 @@ double *single_siman_cones_run(unsigned int *seed, int iter_lim, env_t *env_p, i
   gsl_rng *r = gsl_rng_alloc(gsl_rng_taus);
   gsl_rng_set(r, rand());
 
-  gsl_siman_solve(r, init, cones_energy, siman_cones_step, siman_cones_dist, print_siman_cones, NULL, NULL, NULL, (env->samples->dimension+1)*sizeof(double), params);
+  gsl_siman_solve(r, init, cones_energy, siman_cones_simple_step, siman_cones_dist, print_siman_cones, NULL, NULL, NULL, (env->samples->dimension+1)*sizeof(double), params);
 
   /*double *random_solution = blank_solution(env->samples);
   double random_objective_value = hyperplane_to_solution(h0, random_solution, env);

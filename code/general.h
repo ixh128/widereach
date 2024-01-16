@@ -392,6 +392,10 @@ typedef struct {
     int rnd_trials;
     /** Number of random trials at each invocation of iheur */
     int rnd_trials_cont;
+    /** 1 if this is for a continuous program (xs and ys should be continuous) */
+    int cont;
+    /** epsilon for the quadratic program */
+    double epsilon_prob;
 } params_t;
 
 
@@ -766,11 +770,18 @@ typedef struct {
 vsamples_t *samples_to_vec(samples_t *);
 void vsamples_free(vsamples_t *);
 
+typedef struct round_pts_t {
+  size_t n; //number of points
+  gsl_vector **pts; //points
+  int *npos; //# pos pts attributed to that point
+  int *nneg; //# neg pts attributed to that point
+} round_pts_t;
+
 typedef struct obj_result {
   double obj;
   double prec;
 } obj_result;
-obj_result compute_obj(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c);
+obj_result compute_obj(env_t *env, vsamples_t *vs, gsl_vector *w, gsl_matrix *c, round_pts_t *round_pts);
 gsl_vector *apply_proj(const gsl_matrix *c, const gsl_vector *x);
 
 /** Solve by cones algorithm */
@@ -786,6 +797,7 @@ void normalize_samples(samples_t *);
 typedef struct {
   double obj;
   gsl_vector *w;
+  int *need_recon; //only for mixed
 } cones_result_t; //stores the result of the cones algorithm, if it exists
 
 /** Stores a single subproblem for the cones algorithm */
@@ -793,7 +805,8 @@ typedef struct {
   size_t D;
   gsl_matrix *c;
   double score;
-  double *m; //this can be ignored for the closed problem
+  int **m; //this can be ignored for the closed problem
+  int *need_recon; //at index D, equals 1 if w = y + au, or -1 if w = y, or 0 if not yet considered, when reconstructing the solution to the D-dimensional subproblem. only for mixed
   struct last_proj {
     size_t class;
     size_t idx; //this is also used as the index of the rounding point
@@ -821,17 +834,32 @@ size_t prio_get_n(prio_queue_t *);
 double *single_siman_cones_run(unsigned int *, int, env_t *, int *);
 void add_new_proj_ip(gsl_matrix *, const gsl_vector *);
 gsl_vector *get_proj_basis(env_t *, gsl_vector **);
+gsl_vector *get_proj_basis_idxs(env_t *, vsamples_t *, int *idxs);
 
 double *best_random_hyperplane_proj(int, env_t *);
 
 double *single_exact_run_open(env_t *);
 
-typedef struct {
-  size_t n; //number of points
-  gsl_vector **pts; //points
-} round_pts_t;
-
 gsl_vector **uniform_sphere_points(size_t n, size_t d);
 double *best_random_hyperplane_unbiased(int, env_t *);
-gsl_vector **random_round_points(env_t *, vsamples_t *, size_t);
+round_pts_t random_round_points(env_t *, vsamples_t *, size_t);
 vsamples_t *create_rounded_vs(vsamples_t *, round_pts_t *);
+
+typedef struct {
+  round_pts_t round_pts;
+  vsamples_t *rvs;
+} rounded_pts_t;
+
+rounded_pts_t random_rounded_points(env_t *, vsamples_t *, size_t);
+rounded_pts_t cluster_rounded_points(env_t *, vsamples_t *, size_t);
+rounded_pts_t cluster_rounded_points_consistent(env_t *, vsamples_t *);
+rounded_pts_t cluster_rounded_points_sep_classes(env_t *, vsamples_t *, size_t);
+
+double insep_score(env_t *env);
+double insep_score_euclid(env_t *env);
+
+struct rand_proj_res {
+  gsl_vector *w;
+  gsl_matrix *c;
+  int *indices;
+} best_random_proj(int initial, env_t *env);
