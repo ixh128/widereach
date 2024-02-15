@@ -74,7 +74,7 @@ double *best_random_hyperplane_unbiased(int initial, env_t *env) {
   double *best_hyperplane = CALLOC(dimension, double);
   for (int k = 0; k < rnd_trials; k++) {
     //double *hyperplane = random_hyperplane_unbiased(dimension);
-    double *hyperplane = CALLOC(dimension, double);
+    double *hyperplane = CALLOC(dimension+1, double);
     random_unit_vector(dimension, hyperplane);
     double value = hyperplane_to_solution(hyperplane, NULL, env);
      if (value > best_value) {
@@ -85,5 +85,6 @@ double *best_random_hyperplane_unbiased(int initial, env_t *env) {
      }
     free(hyperplane);
   }
+  printf("best random hyperplane obj = %g\n", best_value);
   return best_hyperplane;
 }

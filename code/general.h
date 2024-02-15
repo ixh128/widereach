@@ -863,3 +863,68 @@ struct rand_proj_res {
   gsl_matrix *c;
   int *indices;
 } best_random_proj(int initial, env_t *env);
+
+double *single_greer_run(env_t *, double *);
+
+int print_matrix(FILE *, const gsl_matrix *);
+
+//TODO: the below structs should probably be in their own header file:
+//to store the result of clasifying the dataset with a hyperplane, splitting samples into true positives, false positives, etc
+//maybe it would be better to name these differently (based on "pos-pos" "pos-neg", "pos-zero", etc, so that the first word is always the class)
+typedef struct class_res {
+  int *tpos, *fpos, *tneg, *fneg, *pz, *nz;
+  int ntpos, nfpos, ntneg, nfneg, npz, nnz;
+  int nwrong, nright;
+  double obj, max_poss_obj; //max_poss_obj = max possible objective (making pz's positive)
+} class_res;
+
+typedef struct hplane_data {
+  gsl_vector *v;
+  class_res res;
+  int extra; //1 if can be freed, 0 if it's in the tree
+  unsigned int lists; //equals number of lists this appears in (to avoid freeing it with the tree)
+  int res_ent; //1 if the ptrs in class_res are used by another data
+
+  //TODO: maybe refactor to just keep track of the total number of references to it
+} hplane_data;
+
+//each node must store the hyperplane found at that node, its classification result, the "most recent" sample which the hyperplane is orthogonal to, and neighbors
+//maybe once a node's children have been created, we can delete the classification result (for memory)
+//"most recent" means that you can traverse from a node to the root and get all of the samples to which the hyperplane is orthogonal
+//the root node will have no loc
+typedef struct tnode {
+  hplane_data *data;
+  int depth;
+  sample_locator_t loc;
+  int n_children, children_explored;
+  struct tnode *parent, *l_sib, *r_sib, *l_child, *r_child;
+  int key;
+} tnode;
+
+//stack for DFS (maybe put in another file)
+typedef struct nodestack {
+  tnode **nodes;
+  int top, max; //top is the highest occupied index, or -1 if empty
+} tnodestack;
+
+typedef struct lnode {
+  hplane_data *data;
+  struct lnode *prev, *next;
+} lnode;
+
+//linked list of hyperplanes
+typedef struct hplane_list {
+  lnode *head;
+  int max_possible_obj, min_possible_obj; //min_possible_obj is the minimum objective value, max_possible_obj is the maximum possible objective (including current zeros)
+  int max_obj;
+  int count;
+  int poison; //equals 1 iff the list has been changed since last computing max and min
+} hplane_list;
+
+//stores the solution to the pointed-cone LP
+typedef struct pc_soln {
+  double gamma;
+  gsl_vector *x;
+} pc_soln;
+
+pc_soln detect_pointed_cone(vsamples_t *, hplane_data vd);

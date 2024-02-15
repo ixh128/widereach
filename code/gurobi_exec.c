@@ -121,7 +121,7 @@ double *single_gurobi_run(unsigned int *seed,
     
     if (seed != NULL) {
       printf("Applying seed %u\n", *seed);
-      //srand48(*seed);
+      srand48(*seed);
     }
 
     int state;
@@ -190,7 +190,9 @@ double *single_gurobi_run(unsigned int *seed,
     if(nresults > 0)
     TRY_MODEL(state = GRBgettuneresult(model, 0), "apply tuning");
     GRBwrite(model, "post.prm");*/
-    if(param_setting->method == 2) {
+    if(param_setting->method == 1) {
+      ;
+    } else if(param_setting->method == 2) {
       struct rand_proj_res res = best_random_proj(1, env);
       size_t d = env->samples->dimension;
       int n = samples_total(samples);
@@ -326,7 +328,7 @@ double *single_gurobi_run(unsigned int *seed,
     for(int i = 0; i < nvars; i++)
     printf("%0.3f%s", result[i], (i == nvars - 1) ? "\n" : " ");*/
 
-    GRBwrite(model, "soln.json");
+    GRBwrite(model, "soln.sol");
 
     GRBfreeenv(GRBgetenv(model));
     GRBfreemodel(model);

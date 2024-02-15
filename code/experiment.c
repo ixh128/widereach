@@ -270,11 +270,11 @@ exp_res_t experiment(int param_setting) {
      * south german credit  .9 (2, 1) (originally said 0.95 here)
      * crop mapping  .99 (76, 0.974359); 
      * */
-    env.params->theta = 0.9;
-    double lambda_factor = 10;
+    env.params->theta = 0.99;
+    double lambda_factor = 100;
     env.params->branch_target = 0.0;
     env.params->iheur_method = deep;
-    int n = 20;
+    int n = 10;
     // env.params->lambda = 100 * (n + 1); 
     env.params->rnd_trials = 10000;
     // env.params->rnd_trials_cont = 10;
@@ -355,7 +355,7 @@ exp_res_t experiment(int param_setting) {
         printf("Sample seed: %lu\n", samples_seeds[s]);
     
         samples_t *samples;
-	//samples = random_samples(n, n / 2, dimension);
+	samples = random_samples(n, n / 2, dimension);
         //samples = random_sample_clusters(clusters);
 	//samples = random_simplex_samples(&simplex_info);
         infile =
@@ -389,7 +389,12 @@ exp_res_t experiment(int param_setting) {
 	  //fopen("../../instance_generation/instance_1_pca15.dat", "r");
 	  //fopen("../../instance_generation/instance_3.dat", "r");
 	  //fopen("../../instance_generation/instance_3_pca15.dat", "r");
-	samples = read_binary_samples(infile);
+	  //SGC encodings:
+	  //fopen("../../data/south-german-credit/SGC_full.dat", "r");
+	  //new datasets:
+	  //fopen("../../data/rice/rice.dat", "r");
+	  //fopen("../../data/crops/small-sample-corn.dat", "r");
+	//samples = read_binary_samples(infile);
 	fclose(infile);
 	//write_samples(samples, "2cluster4000.dat");
 	//exit(0);
@@ -407,6 +412,10 @@ exp_res_t experiment(int param_setting) {
         env.params->lambda = lambda_factor * (n + 1);
 	env.params->epsilon_precision = 3./990;
 	//env.params->epsilon_precision = 3000./990000;
+
+	/*printf("normalized:\n");
+	print_samples(env.samples);
+	exit(0);*/
 
         //print_samples(env.samples);
         //return (exp_res_t) {0, 0};
@@ -448,20 +457,46 @@ exp_res_t experiment(int param_setting) {
 	      exit(0);*/
 
 	    //double *h = single_gurobi_cones_run(seed, 120000, 1200, &env);
+
 	    //Training results testing:
 	    if(param_setting <= 0) {
-	      double *h = single_exact_run(&env, 900);
-	      double obj = hyperplane_to_solution(h, NULL, &env);
+	      //double *h = single_exact_run(&env, 900);
+	      add_bias(samples);
+	      //feature_scaling(&env);
+	      normalize_samples(samples);
+
+	      gurobi_param p = {0, 2, 0, GRB_INFINITY, -1, 0.15, -1, 3};
+	      /*h = single_gurobi_run(seed, 120000, 1200, &env, &p);
+	      printf("Hyperplane: ");
+	      for(int i = 1; i <= env.samples->dimension + 1; i++)
+		printf("%0.5f%s", h[i], (i == env.samples->dimension + 1) ? "\n" : " ");
+
+	      reaches[k] = reach(h, env.samples);
+	      precisions[k] = precision(h, env.samples);
+	      printf("P = %0.3f\n", precisions[k]);
+	      if(isnan(precisions[k])) precisions[k] = 0;
+	      
+	      printf("Training: %u\t%lg\n", 
+		     reaches[k],
+		     precisions[k]);*/
+	      double *h = NULL;
+
+	      h = single_greer_run(&env, h);
+	      /*double obj = hyperplane_to_solution(h, NULL, &env);
 	      printf("Solved. Obj = %g\n", obj);
 	      printf("Hyperplane: ");
 	      for(int i = 0; i < env.samples->dimension; i++)
-		printf("%g%s", h[i], (i == env.samples->dimension - 1) ? "\n" : " ");
+	      printf("%g%s", h[i], (i == env.samples->dimension - 1) ? "\n" : " ");*/
+	      free(delete_samples(samples));
+	      free(h);
 	      exit(0);
+
 	    } else if(param_setting == 1) {
 	      //use gurobi
 	      /*env.params->epsilon_positive = 0;
 		env.params->epsilon_negative = 0;*/
-	      gurobi_param p = {0, 0, 0, GRB_INFINITY, -1, 0.15, -1, 0};
+	  
+	      gurobi_param p = {0, 2, 0, GRB_INFINITY, -1, 0.15, -1, 0};
 	      h = single_gurobi_run(seed, 120000, 1200, &env, &p);
 	      //h = single_siman_run(seed, 0, &env, h+1);
 	      printf("Objective = %0.3f\n", h[0]);

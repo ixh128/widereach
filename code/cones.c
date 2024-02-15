@@ -32,7 +32,11 @@ vsamples_t *samples_to_vec(samples_t *samples) {
     vs->samples[class] = CALLOC(vs->count[class], gsl_vector *);
     for(size_t i = 0; i < vs->count[class]; i++) {
       vs->samples[class][i] = gsl_vector_calloc(dimension);
-      *vs->samples[class][i] = gsl_vector_view_array(samples->samples[class][i], dimension).vector;
+      //this is technically fine (the vector view will be freed when samples is freed), but address sanitizer doesn't like it
+      //*vs->samples[class][i] = gsl_vector_view_array(samples->samples[class][i], dimension).vector;
+      for(int j = 0; j < dimension; j++) {
+	gsl_vector_set(vs->samples[class][i], j, samples->samples[class][i][j]);
+      }
     }
   }
   return vs;

@@ -140,43 +140,41 @@ int add_gurobi_sample_constr(
                       name);
 }
 
-/*
-  //this is the equality version:
-  int add_gurobi_sample_constr_qp(GRBmodel *model, 
-				sample_locator_t locator,
-				int label, 
-				char *name,
-				const env_t *env) {
+int add_gurobi_sample_constr_qp(
+    GRBmodel *model, 
+    sample_locator_t locator,
+    int label, 
+    char *name,
+    const env_t *env) {
   // Set coefficients of w
   samples_t *samples = env->samples;
   int dimension = (int) samples->dimension;
   size_t class = locator.class;
   size_t sample_index = locator.index;
-
-  double *hplane_coefs = CALLOC(dimension, double); //to become -0.5s
-  for(size_t i = 0; i < dimension; i++)
-    hplane_coefs[i] = -0.5*samples->samples[class][sample_index][i];
-  
   sparse_vector_t *v = 
-    to_sparse(dimension, hplane_coefs, 2);
+    to_sparse(dimension, samples->samples[class][sample_index], 2);
 
-  // Set coefficient of c (this can probably be removed, since we force c = 0)
-  append(v, dimension + 1, -1.); 
+  double c = 1;
+  multiply(v, c);
+
+  // Set coefficient of c
+  //append(v, dimension + 1, -1.); 
   // Change sign depending on sample class
-  //multiply(v, -label);
+  multiply(v, -label);
   // Add sample decision variable
   int col_idx = idx(0, class, sample_index, samples);
-  append(v, col_idx, 1);
+  append(v, col_idx, label);
   
   gurobi_indices(v);
   
   return GRBaddconstr(model,
                       v->len, v->ind+1, v->val+1, 
-                      GRB_EQUAL, 1,
+                      GRB_LESS_EQUAL, label_to_bound(label, env->params),
                       name);
-}*/
+}
 
-int add_gurobi_sample_constr_qp(GRBmodel *model, 
+
+int add_gurobi_sample_constr_qp1(GRBmodel *model, 
 				sample_locator_t locator,
 				int label, 
 				char *name,
@@ -188,14 +186,17 @@ int add_gurobi_sample_constr_qp(GRBmodel *model,
   size_t sample_index = locator.index;
 
   double *hplane_coefs = CALLOC(dimension, double); //to become -0.5s
-  for(size_t i = 0; i < dimension; i++)
-    hplane_coefs[i] = -0.5*samples->samples[class][sample_index][i];
+  for(size_t i = 0; i < dimension; i++) {
+    double c = 100;
+    hplane_coefs[i] = -0.5*c*samples->samples[class][sample_index][i];
+    //hplane_coefs[i] = -0.5*samples->samples[class][sample_index][i];
+  }
   
   sparse_vector_t *v = 
     to_sparse(dimension, hplane_coefs, 2);
 
   // Set coefficient of c (this can probably be removed, since we force c = 0)
-  append(v, dimension + 1, -1.); 
+  //append(v, dimension + 1, -1.); 
   // Change sign depending on sample class
   multiply(v, label);
   // Add sample decision variable
@@ -206,7 +207,7 @@ int add_gurobi_sample_constr_qp(GRBmodel *model,
   
   return GRBaddconstr(model,
                       v->len, v->ind+1, v->val+1, 
-                      GRB_LESS_EQUAL, label,
+                      GRB_LESS_EQUAL, label/2.,
                       name);
 }
 
