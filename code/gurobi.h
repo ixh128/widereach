@@ -32,7 +32,14 @@ typedef struct gurobi_param {
   int VarBranch;
   double Heuristics;
   int Cuts;
+  int RINS;
   int method; //0 for milp, 1 for qp, 2 for cones
+  double *init; //optional initial solution (only for relax within cone right now)
+  int *cone; //optional cone (only for method = 6)
+  struct {
+    sample_locator_t *basis;
+    int n;
+  } ortho; //force hplane to be othogonal to these samples (only for method = 8)
 } gurobi_param;
 
 /** Launch a single experiment 
@@ -84,3 +91,18 @@ double *single_gurobi_cones_run(unsigned int *, int, int, env_t *);
 GRBmodel *gurobi_milp_unbiased(int *, const env_t *);
 GRBmodel *gurobi_qp(int *, const env_t *);
 GRBmodel *gurobi_cones_miqp(int *, const env_t *);
+GRBmodel *gurobi_relaxation(int *, const env_t *);
+GRBmodel *gurobi_relax_within_small_cone(int *state, const env_t *env, double *w);
+GRBmodel *gurobi_relax_within_cone(int *state, const env_t *env, int *cone);
+GRBmodel *gurobi_milp_strict(int *, const env_t *);
+
+GRBmodel *init_gurobi_model(int *state, const env_t *env);
+GRBmodel *gurobi_find_outside_cones(int *state, const env_t *env, int **cones, int n_cones);
+double *find_outside_cones(unsigned int *seed, int tm_lim, env_t *env, int **cones, int n_cones);
+int add_gurobi_outside_cone_lazy(void *cbdata, const env_t *env, int *cone, int cone_idx);
+
+int gurobi_cone_callback(GRBmodel *model, void *cbdata, int where, void *usrdata);
+int gurobi_tree_search_callback(GRBmodel *model, void *cbdata, int where, void *usrdata);
+
+GRBmodel *gurobi_relax_within_subspace(int *state, const env_t *env, sample_locator_t *basis, int ss_dim);
+GRBmodel *gurobi_bilinear(int *state, const env_t *env);

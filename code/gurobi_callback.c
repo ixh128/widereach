@@ -62,6 +62,8 @@ int time_heur(GRBmodel *model, void *cbdata, int where, void *usrdata) {
   return state;
 }
 
+double *last_sol;
+
 int node_heur(GRBmodel *model, void *cbdata, int where, void *usrdata) {
   int state = 0;
   //state |= time_heur(model, cbdata, where, usrdata);
@@ -69,9 +71,14 @@ int node_heur(GRBmodel *model, void *cbdata, int where, void *usrdata) {
   return state;
 }
 
-double *last_sol;
+int compare_relaxation(GRBmodel *model, void *cbdata, int where, void *usrdata) {
+  //compares the most recent relaxation solution with the new integer solution
+  //TODO
+  return 0;
+}
 
 int sol_heur(GRBmodel *model, void *cbdata, int where, void *usrdata) {
+  return compare_relaxation(model, cbdata, where, usrdata);
   // check the agreement between the two most recent integer solutions
   /*int nvars;
   int state;
@@ -263,5 +270,88 @@ int modified_rins(GRBmodel *parent_model, void *cbdata, int where, void *usrdata
     GRBfreemodel(model);
     return state;
   }
+  return 0;
+}
+
+double cb_best_obj = 0;
+int cb_n_cones = 0;
+int gurobi_cone_callback(GRBmodel *model, void *cbdata, int where, void *usrdata) {
+  //whenever we find a new integer solution, expand the cone and add solve within it, then add the constraints to force future solutions to be outside the cone
+  if(where != GRB_CB_MIPSOL) return 0;
+
+  int state = 0;
+  
+  double obj;
+
+  state |= GRBcbget(cbdata, where, GRB_CB_MIPSOL_OBJ, &obj);
+  if(obj <= 0) return 0;
+  
+
+  int nvars;
+  env_t *env = usrdata;
+  state |= GRBgetintattr(model, GRB_INT_ATTR_NUMVARS, &nvars);
+  double *h = CALLOC(nvars, double); //current best integer soln
+  state |= GRBcbget(cbdata, where, GRB_CB_MIPSOL_SOL, h);
+
+  int *cone = expand_cone(env, h);
+  if(!cone) return 0;
+
+  gurobi_param p = {
+    .threads = 0,
+    .MIPFocus = 0,
+    .ImproveStartGap = 0,
+    .ImproveStartTime = GRB_INFINITY,
+    .VarBranch = -1,
+    .Heuristics = 0.05,
+    .Cuts = -1,
+    .RINS = -1,
+    .method = 6,
+    .init = h,
+    .cone = cone
+  };
+  h = single_gurobi_run(0, 12000, 1200, env, &p);
+
+  state |= add_gurobi_outside_cone_lazy(cbdata, env, cone, cb_n_cones);  
+  
+  cb_best_obj = fmax(h[0], cb_best_obj);
+  cb_n_cones++;
+  printf("----------------------------------- STATUS ---------------------------------------\n");
+  printf("%d cones found so far\n", cb_n_cones);
+  printf("best objective = %g\n", cb_best_obj);
+  printf("----------------------------------------------------------------------------------\n");
+
+  free(h);
+  free(cone);
+
+  return state;
+}
+
+int gurobi_tree_search_callback(GRBmodel *model, void *cbdata, int where, void *usrdata) {
+  if(where != GRB_CB_MIPNODE) return 0;
+  //generate solution by rounding
+  //find which vs are 0, constraining the subspace
+  //then generate a random hyperplane in that subspace (or maybe more than 1)
+  //finding the subspace is done with QR fac, so gsl will be used
+
+  int state = 0;
+  int nvars;
+  env_t *env = usrdata;
+  state |= GRBgetintattr(model, GRB_INT_ATTR_NUMVARS, &nvars);
+  double *rel = CALLOC(nvars, double);
+  state |= GRBcbget(cbdata, where, GRB_CB_MIPNODE_REL, rel);
+  
+  int ncols = 0;
+  double tot_sum = 0;
+  int start_v = violation_idx(0, env->samples);
+  int end_v = nvars - 1;
+  for(int i = start_v; i < end_v; i++) {
+    if(fabs(rel[i]) <= 1e-10) ncols++;
+    tot_sum += rel[i];
+  }
+  printf("subspace dim = %d, total sum = %g\n", ncols, tot_sum);
+
+  
+  free(rel);
+  
   return 0;
 }

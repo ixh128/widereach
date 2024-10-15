@@ -1,3 +1,4 @@
+#include <gsl/gsl_blas.h>
 /* --------------------------- Samples -------------------------------- */
 
 /** A group of samples */
@@ -274,6 +275,8 @@ typedef struct {
   double side;
   /** Number of points in each simplex, or NULL for half of the positives to be divided evenly among the clusters. */
   size_t *cluster_sizes;
+  /** Scale parameter for exponentially distributed noise. 0 for sharp boundary */
+  double scale;
 } simplex_info_t;
 
 /** Generates random binary samples in the simplex in the given dimension.
@@ -363,6 +366,10 @@ enum {
 	deep 
 } iheur_method_t;
 
+typedef enum {
+  WRC, MAX_ACC, PREC,
+} obj_code_t;
+
 
 /** Problem instance parameters */
 typedef struct {
@@ -396,6 +403,22 @@ typedef struct {
     int cont;
     /** epsilon for the quadratic program */
     double epsilon_prob;
+
+  struct greer_params {
+    int method; //0 for standard search, 1 for MCTS, 2 for beam
+    int use_heapq; //1 if using a heapq, 0 to use DFS
+    int trunc; //max number of children per node, or 0 to keep all
+    int trim; //1 to trim the tree, 0 to not trim
+    size_t max_heapq_size;
+    double mcts_ucb_const;
+    int beam_width;
+    int classify_cuda; //1 if we should use cuda for classifying (only in beam search for now)
+    obj_code_t obj_code;
+    int no_displace; //1 to skip displacing
+    double gamma; //tradeoff parameter for precision search
+    int bnb; //1 if we want to do branch-and-bound
+    int skip_rec; //1 to skip (i.e. delete) bdy hplanes requiring recursion
+  } greer_params;
 } params_t;
 
 
@@ -458,6 +481,23 @@ void update_solution(
         /** Indexes sorted by violation */
         int *violation_index);
 
+/** Stores samples in GSL vector form */
+typedef struct {
+  /** Dimension of the sample space, and 
+   * size of the values array of all samples in the array */
+  size_t dimension;
+  /** Number of sample categories. */
+  size_t class_cnt;
+  /** Number of samples in each category */
+  size_t *count;
+  /** Label of the samples in each category */
+  int *label;
+  /** Sample array. 
+   * The ith array contains count[i] samples in class label[i].
+   * Each sample is a pointer to a gsl_vector of its components.*/
+  gsl_vector ***samples;
+} vsamples_t;
+
 /* ---------------------------- Environment ----------------------------- */
 
 /** Environment */
@@ -468,6 +508,14 @@ typedef struct {
 	params_t *params;
 	/** Solution data */
 	solution_data_t *solution_data;
+
+        /** samples, stored as gsl vectors */
+        vsamples_t *vsamples;
+        /** data about solutions that have been found in the tree search */
+        struct {
+          gsl_vector **solutions;
+	  size_t n_solns;
+	} tree_solution_data;
 } env_t;
 
 /** Deallocate the samples and the parameters.
@@ -576,6 +624,7 @@ sparse_vector_t *precision_row(
 		samples_t *, 
 		/** Precision threshold */
 		double theta);
+sparse_vector_t *precision_row_strict(samples_t *, double); //the same, but without lagrangian relaxation
 
 /** Returns a new sparse vector representing the left hand side of the 
  * precision constraint, for thresholded vars */
@@ -748,25 +797,6 @@ double precision_scan(
 /** Solve by simulated annealing */
 double *single_siman_run(unsigned int *seed, int iter_lim, env_t *env, double *h0);
 
-#include <gsl/gsl_blas.h>
-
-/** Stores samples in GSL vector form */
-typedef struct {
-  /** Dimension of the sample space, and 
-   * size of the values array of all samples in the array */
-  size_t dimension;
-  /** Number of sample categories. */
-  size_t class_cnt;
-  /** Number of samples in each category */
-  size_t *count;
-  /** Label of the samples in each category */
-  int *label;
-  /** Sample array. 
-   * The ith array contains count[i] samples in class label[i].
-   * Each sample is a pointer to a gsl_vector of its components.*/
-  gsl_vector ***samples;
-} vsamples_t;
-
 vsamples_t *samples_to_vec(samples_t *);
 void vsamples_free(vsamples_t *);
 
@@ -898,7 +928,16 @@ typedef struct tnode {
   sample_locator_t loc;
   int n_children, children_explored;
   struct tnode *parent, *l_sib, *r_sib, *l_child, *r_child;
+  int **branching_data; //branching_data[i][j] = 1 if sample (i,j) has been branched upon by an ancestor, 0 otherwise
+  double score;
   int key;
+  int in_q; //TODO: remove
+  int explored;
+  struct {
+    int times_visited;
+    double mean_obj;
+  } stats;
+  gsl_matrix *parent_basis; //num of cols = node.depth-1. may be NULL, depending on alg
 } tnode;
 
 //stack for DFS (maybe put in another file)
@@ -928,3 +967,72 @@ typedef struct pc_soln {
 } pc_soln;
 
 pc_soln detect_pointed_cone(vsamples_t *, hplane_data vd);
+
+typedef struct {
+  size_t k; //size of heap = 2^k - 1
+  size_t sz; //current max size of heap
+  size_t n; //current number of elements
+  size_t max_sz; //size cap
+  tnode **heap;
+} heapq_t;
+heapq_t *create_heapq(int);
+void heapq_enqueue(heapq_t *, tnode *);
+tnode *heapq_pop_max(heapq_t *);
+tnode *heapq_pop_epsilon(heapq_t *, double);
+size_t heapq_get_n(heapq_t *);
+heapq_t *heapq_free(heapq_t *);
+
+void compute_res_obj(env_t *, class_res *);
+extern void store_samples_cuda(samples_t *);
+extern void free_samples_cuda();
+extern class_res classify_cuda(env_t *, gsl_vector *);
+class_res classify(env_t *, gsl_vector *);
+
+void free_class_res(class_res *);
+gsl_vector *best_random_hyperplane_projection(int, env_t *);
+
+hplane_list *gr_explore(env_t *, gsl_vector *v0, hplane_list *A);
+
+void tree_remove_node(tnode *);
+tnode *free_subtree(tnode *);
+
+typedef struct {
+  double best_obj;
+  double best_max_obj;
+  hplane_data *best_vd;
+  hplane_data *best_max_vd;
+} mcts_stats;
+
+hplane_data *make_hplane_data(gsl_vector *, class_res);
+int **blank_branching_data(vsamples_t *);
+mcts_stats mcts_simulate(env_t *, tnode *);
+hplane_list *create_list();
+void list_add(hplane_list *l, hplane_data *item);
+void list_add_copy(hplane_list *, hplane_data *);
+hplane_list *list_free(hplane_list *);
+void gr_update_b(hplane_list *, hplane_data *);
+void update_b_flips(env_t *, tnode *, hplane_list *);
+int create_node_children_notrim(env_t *, tnode *);
+void create_node_child(env_t *, tnode *, sample_locator_t, int **, double score(env_t *, tnode *));
+double compute_score(env_t *, tnode *);
+tnode *new_empty_child(tnode *);
+gsl_vector *obtain_perp(env_t *, tnode *);
+double dot(gsl_vector *, gsl_vector *);
+hplane_data *dup_hplane_data(hplane_data *);
+void hplane_data_memcpy(hplane_data *dst, hplane_data *src);
+void try_free_data(hplane_data *data);
+void print_vec(gsl_vector *);
+void add_as_child(tnode *parent, tnode *child);
+  
+hplane_list *gr_displace(env_t *, hplane_list *, hplane_list *);
+hplane_list *mcts(env_t *, gsl_vector *, hplane_list *);
+
+extern gsl_matrix *classify_many_cuda(env_t *, tnode **, int);
+extern gsl_matrix *classify_many(env_t *, tnode **, int);
+extern void store_samples_mat(samples_t *);
+
+int *expand_cone(env_t *, double *);
+int *expand_cone_fast(env_t *, double *);
+gsl_vector *obtain_null_vec(gsl_matrix *A);
+
+double eps_sample(env_t *, int);

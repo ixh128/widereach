@@ -145,6 +145,18 @@ sparse_vector_t *precision_row(samples_t *samples, double theta) {
 	return constraint;
 }
 
+sparse_vector_t *precision_row_strict(samples_t *samples, double theta) {
+	size_t len = samples_total(samples) + 2;
+	sparse_vector_t *constraint = sparse_vector_blank(len);
+	size_t class_cnt = samples->class_cnt;
+	for (size_t class = 0; class < class_cnt; class++) {
+		double penalty = label_to_penalty(samples->label[class], theta);
+		cover_row(constraint, class, penalty, samples);
+	}
+	//append(constraint, violation_idx(0, samples), -1.);
+	return constraint;
+}
+
 sparse_vector_t *cover_row(
 		sparse_vector_t *constraint, 
 		size_t class, 
@@ -258,6 +270,48 @@ double hyperplane_to_solution_parts(
     update_solution_element(solution, i, v);
     violation += v * violation_coefficient[class];
     value += hinge(class, v);
+  } 
+  violation = hinge(violation >= 0., violation);
+  if (solution != NULL) {
+    copy_hyperplane(samples->dimension, solution + 1, hyperplane);
+    solution[idx_max] = violation;
+  }
+  value -= params->lambda * violation;
+  
+  return value;
+}
+
+//remove this:
+double hyperplane_to_solution_parts_print(
+        double *hyperplane, 
+        double *solution,
+        params_t *params,
+        samples_t *samples) {
+  if (NULL == hyperplane) {
+    return -DBL_MAX;
+  }
+    
+  double theta = params->theta;
+  double violation = theta * params->epsilon_precision;
+  double violation_coefficient[] = { theta, theta - 1. };
+  double precision[] = { params->epsilon_negative, params->epsilon_positive };
+  int idx_min = idx_extreme(0, 1, 0, samples);
+  int idx_max = violation_idx(0, samples);
+  double value = 0.;
+  for (int i = idx_min; i < idx_max; i++) {
+    sample_locator_t *loc = locator(i, samples);
+    int class = loc->class;
+    double v = side(loc, samples, hyperplane, precision[class]);
+    //free(loc);
+    update_solution_element(solution, i, v);
+    violation += v * violation_coefficient[class];
+    value += hinge(class, v);
+    printf("sample (%d, %ld): ", class, loc->index);
+    for(int i = 0; i < samples->dimension; i++) {
+      printf("%0.3f ", samples->samples[class][loc->index][i]);
+    }
+    printf("\n => v = %g\n", v);
+    free(loc);
   } 
   violation = hinge(violation >= 0., violation);
   if (solution != NULL) {

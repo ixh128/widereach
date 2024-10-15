@@ -151,6 +151,7 @@ int side(
 		double precision) {
     double dist = distance(loc, samples, hyperplane, precision);
     return 0. == dist ? loc->class : dist > 0.;
+    //return dist >= 0;
 }
 
 int side_cnt(
@@ -207,7 +208,6 @@ void add_bias(samples_t *samples) {
     }
   }
   samples->dimension++;
-  printf("in add_bias: %ld\n", samples->dimension);
 }
 
 void normalize_samples(samples_t *samples) {

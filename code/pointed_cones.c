@@ -116,7 +116,7 @@ pc_soln detect_pointed_cone(vsamples_t *vs, hplane_data vd) {
   add_pc_vars(model, vs);
   add_pc_constrs(model, vs, vd);
 
-  E(GRBwrite(model, "tmp_pc.lp")) //TODO: remove
+  //E(GRBwrite(model, "tmp_pc.lp")) //TODO: remove
 
   E(GRBoptimize(model));
 

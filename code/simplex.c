@@ -1,5 +1,6 @@
 #include "widereach.h"
 #include "helper.h"
+#include <math.h>
 
 void mirror_sample(size_t dimension, double *sample) {
   for (size_t i = 0; i < dimension; i++) {
@@ -7,22 +8,32 @@ void mirror_sample(size_t dimension, double *sample) {
   }
 }
 
+double exp_noise(double scale) {
+  //random sample from exponential distribution with the given scale
+  if(scale == 0)
+    return 0;
+  double rate = 1/scale;
+  double unif = drand48();
+  return (-1/rate)*log(1-unif); //inverse of exponential cdf
+}
+
 double **random_simplex_points_old(size_t count, simplex_info_t *simplex_info) {
   /* this is the old function to generate the cluster benchmark */
-	double **samples = CALLOC(count, double *);
-    size_t count_simplex = count / 2;
-    size_t mirror_count = count_simplex / simplex_info->cluster_cnt;
-    size_t dimension = simplex_info->dimension;
-	for (size_t j = 0; j < count_simplex; j++) {
-		samples[j] = random_simplex_point(simplex_info->side, dimension);
-        if (j >= mirror_count) {
-          mirror_sample(dimension, samples[j]);
-        }
-	}
-	for (size_t j = count_simplex; j < count; j++) {
-      samples[j] = random_point(dimension);
+  double **samples = CALLOC(count, double *);
+  size_t count_simplex = count / 2;
+  size_t mirror_count = count_simplex / simplex_info->cluster_cnt;
+  size_t dimension = simplex_info->dimension;
+  for (size_t j = 0; j < count_simplex; j++) {
+    double side = simplex_info->side + exp_noise(simplex_info->scale);
+    samples[j] = random_simplex_point(side, dimension);
+    if (j >= mirror_count) {
+      mirror_sample(dimension, samples[j]);
     }
-	return samples;
+  }
+  for (size_t j = count_simplex; j < count; j++) {
+    samples[j] = random_point(dimension);
+  }
+  return samples;
 }
 
 void shuffle(size_t *arr, size_t n) {
@@ -100,7 +111,7 @@ void set_sample_class_simplex(
 		simplex_info_t *simplex_info) {
 	samples->label[class] = label;
 	samples->count[class] = count;
-	samples->samples[class] = random_simplex_points(count, simplex_info);
+	samples->samples[class] = random_simplex_points_old(count, simplex_info);
 }
 
 samples_t *random_simplex_samples(simplex_info_t *simplex_info) {

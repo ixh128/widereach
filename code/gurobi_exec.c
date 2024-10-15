@@ -126,8 +126,13 @@ double *single_gurobi_run(unsigned int *seed,
 
     int state;
     GRBmodel *model;
-
-    switch(param_setting->method) {
+    int method;
+    if(!param_setting) {
+      method = 0;
+    } else {
+      method = param_setting->method;
+    }
+    switch(method) {
     case 0:
       TRY_MODEL(model = gurobi_milp(&state, env), "model creation");
       break;
@@ -136,9 +141,40 @@ double *single_gurobi_run(unsigned int *seed,
       break;
     case 2:
       TRY_MODEL(model = gurobi_cones_miqp(&state, env), "model creation");
+      TRY_MODEL(state = GRBsetcallbackfunc(model, gurobi_tree_search_callback, env), "set callback");
       break;
     case 3:
       TRY_MODEL(model = gurobi_milp_unbiased(&state, env), "model creation");
+      break;
+    case 4:
+      TRY_MODEL(model = gurobi_relaxation(&state, env), "model creation");
+      break;
+    case 5:
+      if(!param_setting->init) {
+	printf("no initial solution provided\n");
+	return NULL;
+      }
+      TRY_MODEL(model = gurobi_relax_within_small_cone(&state, env, param_setting->init), "model creation");
+      /*TRY_MODEL(state = GRBcomputeIIS(model), "IIS");
+	TRY_MODEL(state = GRBwrite(model, "tmp.ilp"), "write out");*/
+      break;
+    case 6:
+      if(!param_setting->cone) {
+	printf("no cone provided\n");
+	return NULL;
+      }
+      TRY_MODEL(model = gurobi_relax_within_cone(&state, env, param_setting->cone), "model creation");
+      break;
+    case 7:
+      TRY_MODEL(model = gurobi_milp_strict(&state, env), "model creation");
+      /*TRY_MODEL(state = GRBsetcallbackfunc(model, gurobi_cone_callback, env), "set callback");
+	TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "LazyConstraints", 1), "allow lazy constraints");*/
+      break;
+    case 8:
+      TRY_MODEL(model = gurobi_relax_within_subspace(&state, env, param_setting->ortho.basis, param_setting->ortho.n), "model creation");
+      break;
+    case 9:
+      TRY_MODEL(model = gurobi_bilinear(&state, env), "model creation");
       break;
     default:
       printf("invalid method\n");
@@ -169,12 +205,12 @@ double *single_gurobi_run(unsigned int *seed,
     GRBsetintparam(GRBgetenv(model), "ImpliedCuts", 2);
     GRBsetintparam(GRBgetenv(model), "InfProofCuts", 2); */
     
-    printf("optimize ...\n");
+      //printf("optimize ...\n");
 
     double k;
     TRY_MODEL(GRBupdatemodel(model), "update model");
     TRY_MODEL(GRBgetdblattr(model, "Kappa", &k), "get condition number");
-    printf("Kappa = %.3e\n", k);
+    //printf("Kappa = %.3e\n", k);
     
     TRY_MODEL(
       state = GRBsetdblparam(GRBgetenv(model), 
@@ -190,10 +226,12 @@ double *single_gurobi_run(unsigned int *seed,
     if(nresults > 0)
     TRY_MODEL(state = GRBgettuneresult(model, 0), "apply tuning");
     GRBwrite(model, "post.prm");*/
-    if(param_setting->method == 1) {
+    if(param_setting->init) {
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0, env->samples->dimension, param_setting->init), "set start hyperplane");
+    } else if(method == 1 || method == 8) {
       ;
-    } else if(param_setting->method == 2) {
-      struct rand_proj_res res = best_random_proj(1, env);
+    } else if(0 && method == 2) {
+      /*struct rand_proj_res res = best_random_proj(1, env);
       size_t d = env->samples->dimension;
       int n = samples_total(samples);
       int v_start = violation_idx(0, samples);
@@ -214,24 +252,52 @@ double *single_gurobi_run(unsigned int *seed,
 
       TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0, samples_total(samples)+d+1, random_solution_hplane+1), "set start hyperplane");
       //TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, samples_total(samples), random_solution_hplane + env->samples->dimension+2), "set start xs and ys");
-      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, v_start, n, random_solution_v), "set start vs");
-    } else if (param_setting->method == 3) {
-      env->params->epsilon_positive = 0;
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, v_start, n, random_solution_v), "set start vs");*/
+      
+      size_t d = env->samples->dimension;
+      int n = samples_total(samples);
+      env->params->greer_params = (struct greer_params) {
+	.method = 2,
+	.use_heapq = 0,
+	.trunc = 0,
+	.trim = 0,
+	.max_heapq_size = -1,
+	.mcts_ucb_const = 100,
+	.beam_width = 10,
+	.classify_cuda = 0,
+	.obj_code = WRC,
+	.no_displace = 1
+      };
+
+      double *h = best_random_hyperplane_unbiased(1, env);
+      h = single_greer_run(env, h);
+      double *random_solution_hplane = blank_solution(samples);
+      double random_objective_value = hyperplane_to_solution(h, random_solution_hplane, env);
+      printf("Objective value = %g\n", random_objective_value);
+
+      //TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0, samples_total(samples)+d+1, random_solution_hplane+1), "set start hyperplane");
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, samples_total(samples), random_solution_hplane + env->samples->dimension+2), "set start");
+
+    } else if (method == 3 || method == 7) {
+      /*env->params->epsilon_positive = 0;
       env->params->epsilon_negative = 0;
       gurobi_param p = {0, 0, 0, GRB_INFINITY, -1, 0.15, -1, 2};
       double *h = single_gurobi_run(seed, 5000, 1200, env, &p);
       printf("Hyperplane: ");
       for(int i = 0; i < env->samples->dimension+1; i++)
-	printf("%0.3f%s", h[i], (i == env->samples->dimension) ? "\n" : " ");
+      printf("%0.3f%s", h[i], (i == env->samples->dimension) ? "\n" : " ");*/
+
+      double *h = best_random_hyperplane_unbiased(1, env);
 
       double *random_solution = blank_solution(samples);
-      double random_objective_value = hyperplane_to_solution(h+1, random_solution, env);
+      double random_objective_value = hyperplane_to_solution(h, random_solution, env);
       printf("Objective value = %0.3f\n", random_objective_value);
       printf("Precision = %lg, reach = %u\n", precision(random_solution, samples), reach(random_solution, samples));
-      printf("h: Precision = %lg, reach = %u\n", precision(h, samples), reach(h, samples));
+      //printf("h: Precision = %lg, reach = %u\n", precision(h, samples), reach(h, samples));
 
-      //TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, samples_total(samples), random_solution + env->samples->dimension+2), "set start");
-      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0, samples_total(samples), h+1), "set start");
+      TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, env->samples->dimension+1, samples_total(samples), random_solution + env->samples->dimension+2), "set start");
+
+      //TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0, samples->dimension, h), "set start");
       //env->params = params_default();
     } else {
       printf("Generating best of %d hyperplanes\n", env->params->rnd_trials);
@@ -266,13 +332,13 @@ double *single_gurobi_run(unsigned int *seed,
       TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "VarBranch", param_setting->VarBranch), "set branching strategy");
       TRY_MODEL(state = GRBsetdblparam(GRBgetenv(model), "Heuristics", param_setting->Heuristics), "set heuristics");
       TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "Cuts", param_setting->Cuts), "set cuts");
+      //TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "RINS", param_setting->RINS), "set RINS");
     }
 
     //TRY_MODEL(state = GRBsetdblparam(GRBgetenv(model), "NodeLimit", 0), "set node limit");
     //TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "Threads", 1), "set thread limit");
     //TRY_MODEL(state = GRBsetdblparam(GRBgetenv(model), "Heuristics", 0), "disable heuristics");
     //TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "Cuts", 0), "disable cutting planes");
-    //TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "RINS", 0), "disable RINS");
 
     int optimstatus;
     int dimension = env->samples->dimension;
@@ -282,6 +348,8 @@ double *single_gurobi_run(unsigned int *seed,
     //startHyperplanes(env, model);
     //TRY_MODEL(state = GRBsetcallbackfunc(model, backgroundHyperplanes, env), "add random hyperplane callback");
     TRY_MODEL(state = GRBoptimize(model), "optimize");
+    /*TRY_MODEL(state = GRBcomputeIIS(model), "optimize");
+      TRY_MODEL(state = GRBwrite(model, "tmp.ilp"), "write");*/
     //printf("nrels = %d, nfeas = %d\n", nrels, nfeas);
     //stopHyperplanes();
     //printf("Done with first optimization\n");
@@ -314,9 +382,15 @@ double *single_gurobi_run(unsigned int *seed,
       } while(modified);*/
 
     //find optimal value of decision vars
-    printf("%d variables\n", nvars);
     
     //NOTE: modified - should be nvars and not include the objval
+    int sols;
+    TRY_MODEL(state = GRBgetintattr(model, "SolCount", &sols), "get sol count");
+    if(sols == 0) { //no solution was found
+      GRBfreeenv(GRBgetenv(model));
+      GRBfreemodel(model);
+      return NULL;
+    }
     double *result = CALLOC(nvars+1, double);
     TRY_MODEL(state = GRBgetdblattr(model, GRB_DBL_ATTR_OBJVAL, result), "get objective value");
     TRY_MODEL(state = GRBgetdblattrarray(model, GRB_DBL_ATTR_X, 0, nvars, result+1), "get decision vars");
@@ -371,4 +445,57 @@ double *single_gurobi_run(unsigned int *seed,
     
     // return result; */
     return NULL;
+}
+double *find_outside_cones(unsigned int *seed,
+			   int tm_lim,
+			   env_t *env,
+			   int **cones, int n_cones) {
+    samples_t *samples = env->samples;
+    env->solution_data = solution_data_init(samples_total(samples));
+    
+    if (seed != NULL) {
+      printf("Applying seed %u\n", *seed);
+      srand48(*seed);
+    }
+
+    int state;
+    printf("about to make model\n");
+    GRBmodel *model = gurobi_find_outside_cones(&state, env, cones, n_cones);
+    if(!model)
+      printf("no model\n");
+
+
+    TRY_MODEL(state = GRBsetstrparam(GRBgetenv(model), "LogFile", "gurobi_log.log"), "set log file");
+
+    TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "MIPFocus", 1), "set focus");
+
+    TRY_MODEL(state = GRBupdatemodel(model), "update model");
+
+    int nvars;
+    TRY_MODEL(state = GRBgetintattr(model, GRB_INT_ATTR_NUMVARS, &nvars), "get number of variables");
+    
+    //TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "ScaleFlag", 3), "set scale flag");
+    
+
+    printf("optimize ...\n");
+
+    TRY_MODEL(
+      state = GRBsetdblparam(GRBgetenv(model), 
+                             "TimeLimit", 
+                             tm_lim / 1000.),
+      "set time limit");
+
+
+    TRY_MODEL(state = GRBoptimize(model), "optimize");
+    
+    double *result = CALLOC(nvars, double);
+    //TRY_MODEL(state = GRBgetdblattr(model, GRB_DBL_ATTR_OBJVAL, result), "get objective value");
+    TRY_MODEL(state = GRBgetdblattrarray(model, GRB_DBL_ATTR_X, 0, nvars, result), "get decision vars");
+
+    GRBwrite(model, "soln_out.sol");
+
+    GRBfreeenv(GRBgetenv(model));
+    GRBfreemodel(model);
+
+    return result;
 }
