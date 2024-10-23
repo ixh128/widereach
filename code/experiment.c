@@ -47,8 +47,8 @@ int pow10quick(int d) {
   return partial * partial;
 }
 
-//#define FACT_MAX 16
-#define FACT_MAX 9
+#define FACT_MAX 16
+//#define FACT_MAX 9
 unsigned int factorial[FACT_MAX];
 
 void initialize_factorial() {
@@ -103,10 +103,12 @@ void write_samples(samples_t *samples, char *path) {
   fprintf(f, "%lu %lu %lu\n", samples->dimension, samples->count[0], samples->count[1]);
   for(size_t class = 0; class < samples->class_cnt; class++) {
     for(size_t i = 0; i < samples->count[class]; i++) {
+      printf("writing sample %ld of class %ld\n", i, class);
       for(int j = 0; j < samples->dimension; j++) {
 	fprintf(f, "%g ", samples->samples[class][i][j]);
       }
       fprintf(f, "\n");
+      fflush(f);
     }
   }
 }
@@ -177,18 +179,18 @@ exp_res_t experiment(int param_setting) {
      * south german credit  .9 (2, 1) (originally said 0.95 here)
      * crop mapping  .99 (76, 0.974359); 
      * */
-    env.params->theta = 0.1;
-    double lambda_factor = 10;
+    env.params->theta = 0.5;
+    double lambda_factor = 2;
     env.params->branch_target = 0.0;
     env.params->iheur_method = simple;
-    int n = 1000;
+    int n = 4900;
     // env.params->lambda = 100 * (n + 1); 
     env.params->rnd_trials = 10000;
     // env.params->rnd_trials_cont = 10;
     env.params->rnd_trials_cont = 0;
     
     //size_t dimension = param_setting;
-    size_t dimension = 8;
+    size_t dimension = 11;
     
     clusters_info_t clusters[2];
     // int n = pow10quick(dimension);
@@ -215,7 +217,7 @@ exp_res_t experiment(int param_setting) {
       .dimension = dimension,
       .side = side,
       //.cluster_sizes = cluster_sizes
-      .scale = 1
+      .scale = 5
     };
     /*for(int i = 0; i < simplex_info.cluster_cnt; i++)
       printf("%s%ld", i == 0 ? "cluster sizes: " : ", ", cluster_sizes[i]);
@@ -265,7 +267,7 @@ exp_res_t experiment(int param_setting) {
         samples_t *samples;
 	//samples = random_samples(n, n / 2, dimension);
         //samples = random_sample_clusters(clusters);
-	//samples = random_simplex_samples(&simplex_info);
+	samples = random_simplex_samples(&simplex_info);
         infile =
 	  //fopen("../../data/breast-cancer/wdbc-training.dat", "r");
 	  //fopen("../../data/wine-quality/winequality-red-training.dat", "r");
@@ -321,9 +323,9 @@ exp_res_t experiment(int param_setting) {
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.5.dat", "r");
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.3.dat", "r");
 	
-	samples = read_binary_samples(infile);
+	//samples = read_binary_samples(infile);
 	fclose(infile);
-	//write_samples(samples, "2cluster4000.dat");
+	write_samples(samples, "2cluster11_4900_scale5.dat");
 
 	//print_samples(samples);
 	env.samples = samples;
@@ -544,7 +546,7 @@ exp_res_t experiment(int param_setting) {
 	      normalize_samples(samples_validation);*/
 
 	      //h = best_random_hyperplane_unbiased(1, &env);
-	      /*gurobi_param p1 = {
+	      gurobi_param p1 = {
 		.threads = 0,
 		.MIPFocus = 0,
 		.ImproveStartGap = 0,
@@ -564,7 +566,7 @@ exp_res_t experiment(int param_setting) {
 	      double obj = hyperplane_to_solution(h+1, soln, &env);
 	    
 	      printf("obj %g, prec %g, reach %d\n", obj, precision(soln, samples), reach(soln, samples));
-	      exit(0);*/
+	      exit(0);
 
 	      gurobi_param p = {
 		.threads = 0,
