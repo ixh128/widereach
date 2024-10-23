@@ -103,7 +103,6 @@ void write_samples(samples_t *samples, char *path) {
   fprintf(f, "%lu %lu %lu\n", samples->dimension, samples->count[0], samples->count[1]);
   for(size_t class = 0; class < samples->class_cnt; class++) {
     for(size_t i = 0; i < samples->count[class]; i++) {
-      printf("writing sample %ld of class %ld\n", i, class);
       for(int j = 0; j < samples->dimension; j++) {
 	fprintf(f, "%g ", samples->samples[class][i][j]);
       }
