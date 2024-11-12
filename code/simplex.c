@@ -17,15 +17,25 @@ double exp_noise(double scale) {
   return (-1/rate)*log(1-unif); //inverse of exponential cdf
 }
 
+void fix_bound(size_t dimension, double *sample) {
+  //for each dimension, if the sample lies outside of the hypercube, we uniformly distribute it inside of it instead
+  for(size_t i = 0; i < dimension; i++) {
+    if(sample[i] < 0 || sample[i] > 1) {
+      sample[i] = drand48();
+    }
+  }
+}
+
 double **random_simplex_points_old(size_t count, simplex_info_t *simplex_info) {
   /* this is the old function to generate the cluster benchmark */
   double **samples = CALLOC(count, double *);
-  size_t count_simplex = count / 2;
+  size_t count_simplex = count * (1 - simplex_info->noise_ratio);
   size_t mirror_count = count_simplex / simplex_info->cluster_cnt;
   size_t dimension = simplex_info->dimension;
   for (size_t j = 0; j < count_simplex; j++) {
     double side = simplex_info->side + exp_noise(simplex_info->scale);
     samples[j] = random_simplex_point(side, dimension);
+    fix_bound(dimension, samples[j]); //ensures it is inside the hypercube (noise can affect that)
     if (j >= mirror_count) {
       mirror_sample(dimension, samples[j]);
     }
@@ -115,18 +125,68 @@ void set_sample_class_simplex(
 }
 
 samples_t *random_simplex_samples(simplex_info_t *simplex_info) {
-	samples_t *samples = CALLOC(1, samples_t);
-	samples->dimension = simplex_info->dimension;
-	samples->class_cnt = 2;
-	samples->label = CALLOC(2, int);
-	samples->count = CALLOC(2, size_t);
-	samples->samples = CALLOC(2, double **);
-    size_t *positives = &(simplex_info->positives);
-    size_t count = simplex_info->count;
-	if (*positives > count) {
-		*positives = count;
-	}
-	set_sample_class(samples, 0, -1, count - *positives);
-	set_sample_class_simplex(samples, 1,  1, *positives, simplex_info);
-	return samples;
+  samples_t *samples = CALLOC(1, samples_t);
+  samples->dimension = simplex_info->dimension;
+  samples->class_cnt = 2;
+  samples->label = CALLOC(2, int);
+  samples->count = CALLOC(2, size_t);
+  samples->samples = CALLOC(2, double **);
+  size_t *positives = &(simplex_info->positives);
+  size_t count = simplex_info->count;
+  if (*positives > count) {
+    *positives = count;
+  }
+  set_sample_class(samples, 0, -1, count - *positives);
+  set_sample_class_simplex(samples, 1,  1, *positives, simplex_info);
+  return samples;
+}
+
+double **random_prism_points(size_t count, simplex_info_t *simplex_info, size_t dims) {
+  //generates the simplex in "dims" dimensions. remaining dimensions are uniform
+  double **samples = CALLOC(count, double *);
+  size_t count_simplex = count * (1 - simplex_info->noise_ratio);
+  size_t mirror_count = count_simplex / simplex_info->cluster_cnt;
+  size_t dimension = simplex_info->dimension;
+  for (size_t j = 0; j < count_simplex; j++) {
+    double side = simplex_info->side + exp_noise(simplex_info->scale);
+    samples[j] = random_prism_point(side, dimension, dims);
+    fix_bound(dimension, samples[j]); //ensures it is inside the hypercube (noise can affect that)
+    if (j >= mirror_count) {
+      mirror_sample(dimension, samples[j]);
+    }
+  }
+  for (size_t j = count_simplex; j < count; j++) {
+    samples[j] = random_point(dimension);
+  }
+  return samples;
+}
+
+void set_sample_class_prism(
+			    samples_t *samples, 
+			    size_t class, 
+			    int label, 
+			    size_t count,
+			    simplex_info_t *simplex_info,
+			    size_t simplex_dims) {
+  samples->label[class] = label;
+  samples->count[class] = count;
+  samples->samples[class] = random_prism_points(count, simplex_info, simplex_dims);
+}
+
+
+samples_t *random_prism_samples(simplex_info_t *simplex_info, size_t simplex_dims) {
+  samples_t *samples = CALLOC(1, samples_t);
+  samples->dimension = simplex_info->dimension;
+  samples->class_cnt = 2;
+  samples->label = CALLOC(2, int);
+  samples->count = CALLOC(2, size_t);
+  samples->samples = CALLOC(2, double **);
+  size_t *positives = &(simplex_info->positives);
+  size_t count = simplex_info->count;
+  if (*positives > count) {
+    *positives = count;
+  }
+  set_sample_class(samples, 0, -1, count - *positives);
+  set_sample_class_prism(samples, 1,  1, *positives, simplex_info, simplex_dims);
+  return samples;
 }

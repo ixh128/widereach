@@ -107,3 +107,21 @@ double *random_simplex_point(double side, size_t dimension) {
   }
   return values;
 }
+
+double *random_prism_point(double side, size_t dimension, size_t dim_simplex) {
+  double *values = CALLOC(dimension, double);
+  double *cumulative;
+  while (1) {
+    cumulative = random_point_affine(dim_simplex, 0., side);
+    qsort(cumulative, dim_simplex, sizeof(double), doublecmp);
+    cumulative2density(side, dim_simplex, cumulative, values);
+    free(cumulative);
+    if (!has_zero(dim_simplex, values)) {
+      break;
+    }
+  }
+  for(int i = dim_simplex; i < dimension; i++) {
+    values[i] = drand48();
+  }
+  return values;  
+}

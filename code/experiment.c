@@ -178,11 +178,11 @@ exp_res_t experiment(int param_setting) {
      * south german credit  .9 (2, 1) (originally said 0.95 here)
      * crop mapping  .99 (76, 0.974359); 
      * */
-    env.params->theta = 0.5;
-    double lambda_factor = 2;
+    env.params->theta = 0.1;
+    double lambda_factor = 10;
     env.params->branch_target = 0.0;
     env.params->iheur_method = simple;
-    int n = 4900;
+    int n = 5940;
     // env.params->lambda = 100 * (n + 1); 
     env.params->rnd_trials = 10000;
     // env.params->rnd_trials_cont = 10;
@@ -206,17 +206,22 @@ exp_res_t experiment(int param_setting) {
     info->shift[1] = 1. - info->side[1];
     
     info->count[0] = info->count[1] = n / 10;
-    
-    double side = sqrt(fact(dimension) / fact(FACT_MAX - 1));
+
+    //size_t simplex_dims = dimension;
+    size_t simplex_dims = 3;
+    //double side = sqrt(fact(simplex_dims) / fact(FACT_MAX - 1));
+    double side = 0.909;
     size_t cluster_sizes[] = {n/40, n/80, n/80, n/20};
     simplex_info_t simplex_info = {
       .count = n,
-      .positives = n / 5,
+      //.positives = n / 5,
+      .positives = n / 33,
       .cluster_cnt = 1,
       .dimension = dimension,
       .side = side,
       //.cluster_sizes = cluster_sizes
-      .scale = 5
+      .scale = 0,
+      .noise_ratio = 0.5
     };
     /*for(int i = 0; i < simplex_info.cluster_cnt; i++)
       printf("%s%ld", i == 0 ? "cluster sizes: " : ", ", cluster_sizes[i]);
@@ -266,7 +271,8 @@ exp_res_t experiment(int param_setting) {
         samples_t *samples;
 	//samples = random_samples(n, n / 2, dimension);
         //samples = random_sample_clusters(clusters);
-	samples = random_simplex_samples(&simplex_info);
+	//samples = random_simplex_samples(&simplex_info);
+	//samples = random_prism_samples(&simplex_info, simplex_dims);
         infile =
 	  //fopen("../../data/breast-cancer/wdbc-training.dat", "r");
 	  //fopen("../../data/wine-quality/winequality-red-training.dat", "r");
@@ -322,9 +328,10 @@ exp_res_t experiment(int param_setting) {
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.5.dat", "r");
 	  //fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.3.dat", "r");
 	
-	//samples = read_binary_samples(infile);
+	samples = read_binary_samples(infile);
 	fclose(infile);
-	write_samples(samples, "2cluster11_4900_scale5.dat");
+	//write_samples(samples, "1prism11_4900_noise0_scale0.dat");
+	//exit(0);
 
 	//print_samples(samples);
 	env.samples = samples;
@@ -365,128 +372,6 @@ exp_res_t experiment(int param_setting) {
             // precision_scan(seed, &env);
             // glp_printf("Theta: %g\n", env.params->theta);
 
-	    /*h = gurobi_relax(seed, 120000, 1200, &env);
-	    double *soln = blank_solution(samples);
-	    double obj = hyperplane_to_solution(h, soln, &env);
-	    printf("Reach = %d\n", reach(soln, env.samples));
-	    printf("Precision = %g\n", precision(soln, env.samples));
-	    int npos = 0, nneg = 0;
-	    for(int i = 0; i < n; i++)
-	      if(soln[i] == 1) npos++;
-	      else if(soln[i] == 0) nneg++;
-	      printf("%d pos, %d neg\n", npos, nneg);
-	    exit(0);*/
-	    
-	    /*h = single_siman_cones_run(seed, 0, &env, NULL);
-	      exit(0);*/
-	    /*for(int i = 0; i <= 2; i++) {
-	      double *insep = compute_inseparabilities(&env, i);
-	      printf("i = %d => viol = %g\n", i, *insep);
-	      free(insep);
-	    }
-	    exit(0);*/
-
-	    /*printf("insep = %g\n", insep_score(&env));
-	      exit(0);*/
-
-	    //double *h = single_gurobi_cones_run(seed, 120000, 1200, &env);
-
-	    //testing cuda:
-	    /*store_samples_cuda(samples);
-	    printf("stored\n");
-	    vsamples_t *vs = samples_to_vec(samples);
-	    env.vsamples = vs;
-	    size_t d = vs->dimension;
-	    int N = 1000;
-	    gsl_rng *rng = gsl_rng_alloc(gsl_rng_taus);
-	    gsl_rng_set(rng, rand());
-	    for(int i = 0; i < N; i++)  {
-	      double *h = CALLOC(d, double);
-	      gsl_ran_dir_nd(rng, d, h);
-	      gsl_vector w = gsl_vector_view_array(h, d).vector;
-	      class_res res = classify_cuda(&env, &w);
-	      free_class_res(&res);
-	      free(h);
-	    }
-	    printf("done\n");
-	    exit(0);*/
-    
-	    /*gurobi_param p1 = {
-	      .threads = 16,
-	      .MIPFocus = 0,
-	      .ImproveStartGap = 0,
-	      .ImproveStartTime = GRB_INFINITY,
-	      .VarBranch = -1,
-	      .Heuristics = 0.05,
-	      .Cuts = -1,
-	      .RINS = -1,
-	      .method = 3,
-	      .init = NULL
-	    };
-	    env.params->epsilon_positive *= 2;
-	    env.params->epsilon_negative *= 2;
-	    env.params->epsilon_precision *= 2;
-	    //env.params->rnd_trials = 5;
-	    //h = single_gurobi_run(seed, 6000, 1200, &env, &p1);
-	    h = best_random_hyperplane_unbiased(1, &env);
-	    env.params->epsilon_positive /= 2;
-	    env.params->epsilon_negative /= 2;
-	    env.params->epsilon_precision /= 2;
-	    double *soln2 = blank_solution(samples);
-	    double obj2 = hyperplane_to_solution(h, soln2, &env);
-	    printf("Objective = %0.3f\n", obj2);
-
-	    printf("reach = %d\n", reach(soln2, env.samples));
-	    printf("prec = %g\n", precision(soln2, env.samples));
-	    printf("Hyperplane: ");
-	    for(int i = 0; i <= samples->dimension+1; i++)
-	      printf("%g%s", h[i], (i == samples->dimension+1) ? "\n" : " ");
-
-
-	    int *cone = expand_cone(&env, h);
-	    //int *cone = expand_cone(&env, h+1);
-	    for(int i = 0; i < samples_total(samples); i++) {
-	      printf("i = %4d | %d | %d\n", i, (int) soln2[i+env.samples->dimension+2], cone[i]);
-	    }
-	    //cone[0] = 1; //for testing (forcing reach > 0)
-	    gurobi_param p = {
-	      .threads = 0,
-	      .MIPFocus = 0,
-	      .ImproveStartGap = 0,
-	      .ImproveStartTime = GRB_INFINITY,
-	      .VarBranch = -1,
-	      .Heuristics = 0.05,
-	      .Cuts = -1,
-	      .RINS = -1,
-	      .method = 6,
-	      .init = h, //soln2+1,
-	      .cone = cone
-	    };
-	    h = single_gurobi_run(seed, 120000, 1200, &env, &p);
-	    printf("Objective = %0.3f\n", h[0]);
-	    printf("Hyperplane: ");
-	    for(int i = 0; i <= samples->dimension+1; i++)
-	      printf("%g%s", h[i], (i == samples->dimension+1) ? "\n" : " ");
-
-	    env.params->epsilon_positive = 0;
-	    env.params->epsilon_negative = 0;
-	    env.params->epsilon_precision = 0;
-	    double *soln1 = blank_solution(samples);
-	    double obj1 = hyperplane_to_solution(h+1, soln1, &env);
-	    printf("Objective = %0.3f\n", obj1);
-
-	    printf("reach = %d\n", reach(soln1, env.samples));
-	    printf("prec = %g\n", precision(soln1, env.samples));
-	    printf("Hyperplane: ");
-	    for(int i = 1; i <= env.samples->dimension + 1; i++)
-	      printf("%0.5f%s", soln1[i], (i == env.samples->dimension + 1) ? "\n" : " ");
-	    exit(0);*/
-	    /*add_bias(samples);
-	    normalize_samples(samples);
-	    printf("minimal angle = %g\n", min_angle(samples));
-	    //printf("cos = %g\n", cos(min_angle(samples)));
-	    exit(0);*/
-
 	    //Training results testing:
 	    if(param_setting <= 0) {
 	      //double *h = single_exact_run(&env, 900);
@@ -510,16 +395,7 @@ exp_res_t experiment(int param_setting) {
 		.bnb = 0,
 	      };
 
-	      //double v0[] = {-0.000648874, -0.00520848, 0.0440311, 0.000688538, -0.171792, -0.000330577, 9.81869e-05, -0.777746, 0.0391895, -0.0820617, 0.00630367, 0.59609};
 	      h = best_random_hyperplane_unbiased(1, &env);
-	      //h = CALLOC(dimension, double); h[0] = 1;
-	      //h = best_random_hyperplane_projection(1, &env);
-
-	      
-	      
-	      /*h = single_greer_run(&env, h);
-	      env.params->greer_params.beam_width = 1000;
-	      env.params->greer_params.obj_code = WRC;*/
 	      h = single_greer_run(&env, h);
 
 	      /*double obj = hyperplane_to_solution(h, NULL, &env);
@@ -565,132 +441,12 @@ exp_res_t experiment(int param_setting) {
 	      double obj = hyperplane_to_solution(h+1, soln, &env);
 	    
 	      printf("obj %g, prec %g, reach %d\n", obj, precision(soln, samples), reach(soln, samples));
-	      exit(0);
-
-	      gurobi_param p = {
-		.threads = 0,
-		.MIPFocus = 3,
-		.ImproveStartGap = 0,
-		.ImproveStartTime = GRB_INFINITY,
-		.VarBranch = 0,
-		.Heuristics = 0.05,
-		.Cuts = -1,
-		.RINS = -1,
-		.method = 7,
-		.init = NULL
-	      };
-
-	      //double epss[11] = {1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1, 1};
-	      double thetas[7] = {0.05, 0.15, 0.2, 0.3, 0.5, 0.7, 0.9};
-	      double lfs[7] = {20, 20, 5, 10, 2, 10, 10};
-	      double objs[11];
-	      double reaches[11];
-	      double precisions[11];
-	      double v_reaches[11];
-	      double v_precisions[11];
-	      time_t times[11];
-	      int tm_lim = 400000; //10 minutes
-	      double epsp = env.params->epsilon_negative;
-	      double epsn = env.params->epsilon_negative;
-	      for(int i = 0; i < 7; i++) {
-		//env.params->epsilon_positive = env.params->epsilon_negative = epss[i];
-		//env.params->epsilon_positive = epss[i];
-		env.params->epsilon_negative = epsn;
-		env.params->epsilon_positive = epsp;
-		env.params->theta = thetas[i];
-		env.params->lambda = lfs[i] * (n + 1);
-		time_t start = time(0);
-		h = single_gurobi_run(seed, tm_lim, 1200, &env, &p);
-		if(!h) {
-		  objs[i] = reaches[i] = precisions[i] = times[i] = -1;
-		  continue;
-		}
-		time_t end = time(0);
-		env.params->epsilon_positive = env.params->epsilon_negative = 0;
-
-		double *soln = blank_solution(samples);
-		double obj = hyperplane_to_solution(h+1, soln, &env);
-
-		objs[i] = h[0];
-		reaches[i] = reach(soln, env.samples);
-		precisions[i] = precision(soln, env.samples);
-
-		double *v_soln = blank_solution(samples_validation);
-		env.samples = samples_validation;
-		hyperplane_to_solution(h+1, v_soln, &env);
-		env.samples = samples;
-		v_reaches[i] = reach(soln, samples_validation);
-		v_precisions[i] = precision(soln, samples_validation);
-		times[i] = end-start;
-		free(h);
-		free(soln);
-		free(v_soln);
-	      }
-	      /*printf("eps    |  time  |  obj  | t_reach | t_prec | v_reach | v_prec \n");
-	      printf("--------------------------------------------------------------\n");
-	      for(int i = 0; i < 11; i++) {
-		printf("%6g | %6ld | %5g | %7g | %6g | %7g | %6g\n", epss[i], times[i], objs[i], reaches[i], precisions[i], v_reaches[i], v_precisions[i]);
-		}*/
-	      printf("theta  |  time  |  obj  | t_reach | t_prec | v_reach | v_prec \n");
-	      printf("--------------------------------------------------------------\n");
-	      for(int i = 0; i < 7; i++) {
-		printf("%6g | %6ld | %5g | %7g | %6g | %7g | %6g\n", thetas[i], times[i], objs[i], reaches[i], precisions[i], v_reaches[i], v_precisions[i]);
-	      }
-	      exit(0);
-	      //env.params->rnd_trials = 5;
-	      //env.params->epsilon_positive = 1e-5;
-	      //env.params->epsilon_negative = 1e-5;
-	      env.params->epsilon_positive *= 2;
-	      env.params->epsilon_negative *= 2;
-	      h = single_gurobi_run(seed, 120000, 1200, &env, &p);
-	      //env.params->epsilon_positive /= 2;
-	      //env.params->epsilon_negative /= 2;
-	      //h = single_gurobi_run(seed, 120000, 1200, &env, NULL);
-	      //h = gurobi_relax(seed, 120000, 1200, &env);
-	      //h = single_gurobi_run(seed, 12000000, 1200, &env, &p);
-	      //h = single_siman_run(seed, 0, &env, h+1);
 	      printf("Objective = %0.3f\n", h[0]);
 	      printf("Hyperplane: ");
 	      for(int i = 0; i <= samples->dimension+1; i++)
 		printf("%g%s", h[i], (i == samples->dimension+1) ? "\n" : " ");
 
 	      h++; //so that making the solution below works (small memory leak)
-	      //p.method = 5;
-	      //p.init = h+1;
-	      /*env.params->epsilon_positive = 0;
-	      env.params->epsilon_negative = 0;
-	      env.params->epsilon_precision = 0;*/
-
-	      //h = single_gurobi_run(seed, 120000, 1200, &env, &p);
-	      /*printf("Result: ");
-	      for(int i = 0; i <= samples->dimension+1+samples_total(samples); i++)
-		printf("%g ", h[i]);
-		printf("\n");*/
-
-	      
-	      /*double *random_solution = blank_solution(samples);
-	      double random_objective_value = hyperplane_to_solution(h+1, random_solution, &env);
-	      printf("Reach = %0.3f\n", random_objective_value);
-	      printf("Hyperplane: ");
-	      for(int i = 0; i <= samples->dimension+1; i++)
-		printf("%g%s", h[i], (i == samples->dimension+1) ? "\n" : " ");
-
-	      printf("checking agreement\n");
-	      for(int i = 1; i < samples->dimension+samples_total(samples); i++) {
-		int check = h[i] == random_solution[i];
-		printf("%3d | % 7.5f | % 7.5f | %d", i, h[i], random_solution[i], check);
-		if(!check) {
-		  sample_locator_t *loc = locator(i, samples);
-		  printf(". s (%s) = (", loc->class ? "+" : "-");
-		  for(int j = 0; j < samples->dimension; j++) {
-		    printf("%g%s", samples->samples[loc->class][loc->index][j], j == samples->dimension - 1 ? ")\n" : ", ");
-		  }
-		} else
-		  printf("\n");
-		  }*/
-	      //free(random_solution);
-	      //h = random_solution;
-
 	    } else if (param_setting == 2) {
 	      //use glpk
 	      h = single_run(seed, 120000, &env);
@@ -838,6 +594,78 @@ exp_res_t experiment(int param_setting) {
 	    }
 	    exit(0);
 	
+	    } else if(param_setting == 6) {
+	      //testing different epsilon/theta values
+	      gurobi_param p = {
+		.threads = 0,
+		.MIPFocus = 3,
+		.ImproveStartGap = 0,
+		.ImproveStartTime = GRB_INFINITY,
+		.VarBranch = 0,
+		.Heuristics = 0.05,
+		.Cuts = -1,
+		.RINS = -1,
+		.method = 7,
+		.init = NULL
+	      };
+
+	      //double epss[11] = {1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1, 1};
+	      double thetas[7] = {0.05, 0.15, 0.2, 0.3, 0.5, 0.7, 0.9};
+	      double lfs[7] = {20, 20, 5, 10, 2, 10, 10};
+	      double objs[11];
+	      double reaches[11];
+	      double precisions[11];
+	      double v_reaches[11];
+	      double v_precisions[11];
+	      time_t times[11];
+	      int tm_lim = 400000; //10 minutes
+	      double epsp = env.params->epsilon_negative;
+	      double epsn = env.params->epsilon_negative;
+	      for(int i = 0; i < 7; i++) {
+		//env.params->epsilon_positive = env.params->epsilon_negative = epss[i];
+		//env.params->epsilon_positive = epss[i];
+		env.params->epsilon_negative = epsn;
+		env.params->epsilon_positive = epsp;
+		env.params->theta = thetas[i];
+		env.params->lambda = lfs[i] * (n + 1);
+		time_t start = time(0);
+		h = single_gurobi_run(seed, tm_lim, 1200, &env, &p);
+		if(!h) {
+		  objs[i] = reaches[i] = precisions[i] = times[i] = -1;
+		  continue;
+		}
+		time_t end = time(0);
+		env.params->epsilon_positive = env.params->epsilon_negative = 0;
+
+		double *soln = blank_solution(samples);
+		double obj = hyperplane_to_solution(h+1, soln, &env);
+
+		objs[i] = h[0];
+		reaches[i] = reach(soln, env.samples);
+		precisions[i] = precision(soln, env.samples);
+
+		double *v_soln = blank_solution(samples_validation);
+		env.samples = samples_validation;
+		hyperplane_to_solution(h+1, v_soln, &env);
+		env.samples = samples;
+		v_reaches[i] = reach(soln, samples_validation);
+		v_precisions[i] = precision(soln, samples_validation);
+		times[i] = end-start;
+		free(h);
+		free(soln);
+		free(v_soln);
+	      }
+	      /*printf("eps    |  time  |  obj  | t_reach | t_prec | v_reach | v_prec \n");
+	      printf("--------------------------------------------------------------\n");
+	      for(int i = 0; i < 11; i++) {
+		printf("%6g | %6ld | %5g | %7g | %6g | %7g | %6g\n", epss[i], times[i], objs[i], reaches[i], precisions[i], v_reaches[i], v_precisions[i]);
+		}*/
+	      printf("theta  |  time  |  obj  | t_reach | t_prec | v_reach | v_prec \n");
+	      printf("--------------------------------------------------------------\n");
+	      for(int i = 0; i < 7; i++) {
+		printf("%6g | %6ld | %5g | %7g | %6g | %7g | %6g\n", thetas[i], times[i], objs[i], reaches[i], precisions[i], v_reaches[i], v_precisions[i]);
+	      }
+	      exit(0);
 	    } else {
 	      printf("invalid arg\n"); exit(1);
 	    }

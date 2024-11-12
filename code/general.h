@@ -277,6 +277,8 @@ typedef struct {
   size_t *cluster_sizes;
   /** Scale parameter for exponentially distributed noise. 0 for sharp boundary */
   double scale;
+  /** What fraction of the positives should be background noise? Value [0,1]. Default should be 0.5. TODO: get rid of this - it is redundant with cluster_sizes */
+  double noise_ratio;
 } simplex_info_t;
 
 /** Generates random binary samples in the simplex in the given dimension.
@@ -286,7 +288,38 @@ typedef struct {
  * @return A newly allocated group of samples
  **/
 samples_t *random_simplex_samples(simplex_info_t *);
+/** Generates the positives in the cartesian product of a simplex in k dims with [0,1]^(n-k)
+    i.e. a prism
+**/
+samples_t *random_prism_samples(simplex_info_t *, size_t);
 
+//functions for generating samples where the positives follow some probability distribution that tightly clusters them around a corner
+//so they will be like the cluster benchmarks but with a fuzzy boundary
+
+typedef enum {
+  CHI_SQ, //choosing chi_sq is equivalent to sampling points from a (truncated) multivariate gaussian. param = degrees of freedom
+  EXP, //param = scale,
+  STUDENT_T //param = nu (smaller => heavier tail). we take the absolute value of this to make it one-sided
+} cluster_dist;
+
+typedef struct {
+  /** Total number of samples */
+  size_t count;
+  /** Number of positive points  */
+  size_t positives;
+  /** Number of positive points in the "cluster" */
+  size_t cluster_size;
+  /** Dimension of the sample space */
+  size_t dimension;
+  /** Maximum radius (any point exceeding this will be resampled) */
+  double max_rad;
+  /** Choice of distribution */
+  cluster_dist dist;
+  /** Parameter(s) for the chosen distribution. Size depends on dist */
+  double param;
+} fuzzy_info_t;
+
+samples_t *random_fuzzy_samples(fuzzy_info_t *fuzzy_info);
 
 /* ---------------------- Sparse Vectors ---------------------------- */
 
@@ -737,6 +770,10 @@ double *random_simplex_point(
     double side,
     /** Vector size */
     size_t dimension);
+
+/** Generates a random vector in the prism given by the cartesian product of a simplex with [0,1]^(n-k). Returns a newly allocated vector.
+ */
+double *random_prism_point(double side, size_t dimension, size_t dim_simplex);
 
 /** Copy a hyperplane of the given dimension into another one.
  * A hyperplane is defined as dimension+1 vector in which the first
