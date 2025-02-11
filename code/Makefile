@@ -12,9 +12,9 @@ endif
 
 INC = $(GUROBI_HOME)/include/
 ifdef CUDA
-  LIBS = -L$(GUROBI_HOME)/lib -L/usr/local/cuda/lib64 -lgurobi95 -lglpk -lm -lgsl -lnvblas -lopenblas
+  LIBS = -L$(GUROBI_HOME)/lib -L/usr/local/cuda/lib64 -lgurobi120 -lglpk -lm -lgsl -lnvblas -lopenblas
 else
-  LIBS = -L$(GUROBI_HOME)/lib -lgurobi95 -lglpk -lm -lgsl -lgslcblas -lcublas -L/usr/local/cuda/lib64 -lcudart
+  LIBS = -L$(GUROBI_HOME)/lib -lgurobi120 -lglpk -lm -lgsl -lgslcblas -L/usr/local/cuda/lib64
 endif
 #LIBS = -L$(GUROBI_HOME)/lib -lgurobi100 -lglpk -lm
 BASE = widereach.h helper.h general.h glpk.h Makefile
@@ -23,7 +23,7 @@ OBJ = samples.o sparse_vector.o env.o indexing.o glpk.o params.o callback.o \
       traversal.o signature.o children.o paths.o random.o hyperplane.o \
       obstruction.o interdiction.o cuts.o icutgen.o readsamples.o clusters.o \
       exec.o simplex.o \
-      gurobi_exec.o gurobi.o bg_callback.o gurobi_callback.o constrained_hyperplane.o simulated_annealing.o sep_test.o cones.o priority_queue.o gurobi_cones.o siman_cones.o clustering.o greer_tree.o pointed_cones.o heapq.o cuda_fns.o mcts.o cone_exp.o eps_sample.o
+      gurobi_exec.o gurobi.o bg_callback.o gurobi_callback.o constrained_hyperplane.o simulated_annealing.o sep_test.o cones.o priority_queue.o gurobi_cones.o siman_cones.o clustering.o greer_tree.o pointed_cones.o heapq.o mcts.o cone_exp.o eps_sample.o fuzzy.o solution_log.o
 UOBJ = utest.o
 
 .PHONY: all coverage clean dependencies valgrind cleancoverage
@@ -52,9 +52,6 @@ valgrind:	utest
 
 dependencies:
 	sudo apt install libcunit1-dev glpk-doc libglpk-dev
-
-cuda_fns.o: cuda_fns.cu $(BASE)
-	nvcc -g -O3 -DNDEBUG -I $(INC) -lcublas -c -o $@ $<
 
 %.o:	%.c $(BASE)
 	$(CC) $(CFLAGS) -I $(INC) -c -o $@ $< -fopenmp

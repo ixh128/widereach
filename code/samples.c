@@ -322,3 +322,39 @@ rounded_pts_t random_rounded_points(env_t *env, vsamples_t *vs, size_t n) {
   round_pts_t round_pts = random_round_points(env, vs, n);
   return (rounded_pts_t) {round_pts, create_rounded_vs(vs, &round_pts)};
 }
+
+samples_t *flip_negatives(samples_t *samples) {
+  //returns a new set of samples in which all negatives have been flipped into positives, and in which there are no negative samples
+  //all original positives become negatives
+  //this is for the purpose of forcing all xs to be 1
+
+  size_t dimension = samples->dimension;
+  samples_t *out = CALLOC(1, samples_t);
+  out->dimension = dimension;
+  out->class_cnt = 2;
+  out->label = CALLOC(2, int);
+  out->count = CALLOC(2, size_t);
+  out->samples = CALLOC(2, double **);
+
+  out->label[0] = -1;
+  out->count[0] = samples->count[1];
+  out->samples[0] = CALLOC(out->count[0], double *);
+  for(int i = 0; i < out->count[0]; i++) {
+    out->samples[0][i] = CALLOC(dimension, double);
+    for(int j = 0; j < dimension; j++) {
+      out->samples[0][i][j] = -samples->samples[1][i][j];
+    }
+  }
+
+  out->label[1] = 1;
+  out->count[1] = samples->count[0];
+  out->samples[1] = CALLOC(out->count[1], double *);
+  for(int i = 0; i < out->count[1]; i++) {
+    out->samples[1][i] = CALLOC(dimension, double);
+    for(int j = 0; j < dimension; j++) {
+      out->samples[1][i][j] = -samples->samples[0][i][j];
+    }
+  }  
+
+  return out;
+}

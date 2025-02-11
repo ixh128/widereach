@@ -152,7 +152,34 @@ double **random_prism_points(size_t count, simplex_info_t *simplex_info, size_t 
     samples[j] = random_prism_point(side, dimension, dims);
     fix_bound(dimension, samples[j]); //ensures it is inside the hypercube (noise can affect that)
     if (j >= mirror_count) {
-      mirror_sample(dimension, samples[j]);
+      mirror_sample(dims, samples[j]);
+    }
+  }
+  for (size_t j = count_simplex; j < count; j++) {
+    samples[j] = random_point(dimension);
+  }
+  return samples;
+}
+
+double **random_prism_points_unbalanced(size_t count, simplex_info_t *simplex_info, size_t dims, double ratio, double side1, double side2) {
+  //generates the simplex in "dims" dimensions. remaining dimensions are uniform
+  //ratio = fraction of cluster points which should be in the first cluster
+  //side1 and 2 are side lengths of those clusters
+  double **samples = CALLOC(count, double *);
+  size_t count_simplex = count * (1 - simplex_info->noise_ratio);
+  //size_t mirror_count = count_simplex / simplex_info->cluster_cnt;
+  size_t mirror_count = ratio * count_simplex; //just to test imbalanced clusters
+  size_t dimension = simplex_info->dimension;
+  for (size_t j = 0; j < count_simplex; j++) {
+    if (j >= mirror_count) {
+      double side = side2 + exp_noise(simplex_info->scale);
+      samples[j] = random_prism_point(side, dimension, dims);
+      fix_bound(dimension, samples[j]); //ensures it is inside the hypercube (noise can affect that)
+      mirror_sample(dims, samples[j]);
+    } else {
+      double side = side1 + exp_noise(simplex_info->scale);
+      samples[j] = random_prism_point(side, dimension, dims);
+      fix_bound(dimension, samples[j]);
     }
   }
   for (size_t j = count_simplex; j < count; j++) {
@@ -190,3 +217,13 @@ samples_t *random_prism_samples(simplex_info_t *simplex_info, size_t simplex_dim
   set_sample_class_prism(samples, 1,  1, *positives, simplex_info, simplex_dims);
   return samples;
 }
+
+double *prism_cut_hplane(simplex_info_t *simplex_info, size_t simplex_dims) {
+  double *w = CALLOC(simplex_info->dimension + 1, double);
+  for(int i = 0; i < simplex_dims; i++) {
+    w[i] = -1;
+  }
+  w[simplex_info->dimension] = -simplex_info->side;
+  return w;
+}
+
