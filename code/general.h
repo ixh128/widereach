@@ -300,12 +300,14 @@ double *prism_cut_hplane(simplex_info_t *simplex_info, size_t simplex_dims);
 // the cluster benchmarks but with a fuzzy boundary
 
 typedef enum {
-  CHI_SQ,   // scaled chi-squared. param = sigma
-  CHI,      // choosing chi is equivalent to sampling points from a (truncated)
-            // multivariate gaussian. param = sigma
-  EXP,      // param = scale,
-  STUDENT_T // param = nu (smaller => heavier tail). we take the absolute value
-            // of this to make it one-sided
+  CHI_SQ,    // scaled chi-squared. param = sigma
+  CHI,       // choosing chi is equivalent to sampling points from a (truncated)
+             // multivariate gaussian. param = sigma
+  EXP,       // param = scale,
+  STUDENT_T, // param = nu (smaller => heavier tail). we take the absolute value
+             // of this to make it one-sided
+  LOG_NORMAL, // param = sigma (standard deviation)
+  NORMAL, //param = sigma. takes absolute value
 } cluster_dist;
 
 typedef struct {
@@ -421,6 +423,66 @@ typedef enum {
   PREC,
 } obj_code_t;
 
+typedef enum {
+  /** standard binary variables */
+  BIN,
+  /** continuous variables */
+  CONT,
+} var_type_t;
+
+/** Defines the type of constraints on the xs and ys */
+typedef enum {
+  /** standard constraints */
+  STANDARD_CONSTR,
+  /** bilinear constraints */
+  BILINEAR,
+  /** threshold constraints */
+  THRESHOLD
+} constr_type_t;
+
+typedef struct {
+  int threads;
+  int MIPFocus;
+  double ImproveStartGap;
+  double ImproveStartTime;
+  int VarBranch;
+  double Heuristics;
+  int Cuts;
+  int RINS;
+  int method;
+  /** optional initial solution */
+  double *init;
+  /** optional cone, to constrain the solve inside/outside depending on method
+   */
+  int *cone;
+  /** collection of samples, to which the hyperplane must be orthogonal (for
+   * method = 8) */
+  struct {
+    sample_locator_t *basis;
+    int n;
+  } ortho;
+  /** if 1, sets the xs to have higher priority than the ys */
+  int pos_prio;
+  /** if 1, forces all xs to be 1 (for testing) */
+  int force_pos;
+  /** if 1, forces c = 0 to do unbiased classification */
+  int unbiased; // 1 to force c = 0
+  /** sets how the precision constraint is implemented in the MILP */
+  enum { STRICT, LAGRANGIAN, PIECEWISE_LIN, EXP_BAR } penalty;
+  /** sets how the decision variables (xs and ys) are implemented */
+  var_type_t var_type;
+  /** sets how the constraints on the xs and ys are implemented */
+  constr_type_t constr_type;
+
+  /** time limit for solve */
+  int tm_lim;
+  /** time limit for autotuning */
+  int tm_lim_tune;
+
+} gurobi_params_t;
+
+gurobi_params_t *gurobi_params_default();
+
 /** Problem instance parameters */
 typedef struct {
   /** Problem name */
@@ -473,6 +535,9 @@ typedef struct {
     int skip_rec;    // 1 to skip (i.e. delete) bdy hplanes requiring recursion
     int use_rel; // 1 to solve a relaxation to get the hyperplane at each node
   } greer_params;
+
+  gurobi_params_t *gurobi_params;
+
 } params_t;
 
 /** Return a new parameter set with default values */
@@ -552,6 +617,9 @@ void append_to_log(solution_log_t *log, double obj, double time);
 
 /** Prints out the solution log in a table */
 void print_solution_log(solution_log_t *log);
+
+/** Resets the solution log to empty */
+void clear_solution_log(solution_log_t *log);
 
 /* ---------------------------- GSL vector samples --------------------- */
 

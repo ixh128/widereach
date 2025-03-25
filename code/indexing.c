@@ -243,6 +243,8 @@ unsigned int false_positives(double *solution, samples_t *samples) {
 double precision(double *solution, samples_t *samples) {
   double r = (double) reach(solution, samples);
   double fp = (double) false_positives(solution, samples);
+  if(fp == 0) //to handle 0/0
+    return 1;
   return r / (r + fp);
 }
 

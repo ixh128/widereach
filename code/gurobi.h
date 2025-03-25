@@ -21,28 +21,6 @@ double *gurobi_relax(
     /** Time limit in milliseconds for tuning the model */
     int tm_lim_tune, env_t *);
 
-typedef struct gurobi_param {
-  int threads;
-  int MIPFocus;
-  double ImproveStartGap;
-  double ImproveStartTime;
-  int VarBranch;
-  double Heuristics;
-  int Cuts;
-  int RINS;
-  int method; // 0 for milp, 1 for qp, 2 for cones
-  double
-      *init; // optional initial solution (only for relax within cone right now)
-  int *cone; // optional cone (only for method = 6)
-  struct {
-    sample_locator_t *basis;
-    int n;
-  } ortho; // force hplane to be othogonal to these samples (only for method =
-           // 8)
-  int pos_prio;  // 1 to set the xs to have higher branch priority than the ys
-  int force_pos; // 1 to force all xs to be 1 (for testing)
-} gurobi_param;
-
 /** Launch a single experiment
 
  @return a new array in which
@@ -52,11 +30,7 @@ typedef struct gurobi_param {
 double *single_gurobi_run(
     /** Seed for the random number generator, or NULL if the drand48 does not
      * need to be reseeded */
-    unsigned int *seed,
-    /** Time limit in milliseconds */
-    int tm_lim,
-    /** Time limit in milliseconds for tuning the model */
-    int tm_lim_tune, env_t *, gurobi_param *);
+    unsigned int *seed, env_t *env);
 
 /** Random hyperplane callback for gurobi */
 int backgroundHyperplanes(GRBmodel *, void *, int, void *);

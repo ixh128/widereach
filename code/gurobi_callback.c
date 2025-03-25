@@ -326,18 +326,9 @@ int gurobi_cone_callback(GRBmodel *model, void *cbdata, int where,
   if (!cone)
     return 0;
 
-  gurobi_param p = {.threads = 0,
-                    .MIPFocus = 0,
-                    .ImproveStartGap = 0,
-                    .ImproveStartTime = GRB_INFINITY,
-                    .VarBranch = -1,
-                    .Heuristics = 0.05,
-                    .Cuts = -1,
-                    .RINS = -1,
-                    .method = 6,
-                    .init = h,
-                    .cone = cone};
-  h = single_gurobi_run(0, 12000, 1200, env, &p);
+  env->params->gurobi_params->cone = cone;
+  env->params->gurobi_params->init = h;
+  h = single_gurobi_run(0, env);
 
   state |= add_gurobi_outside_cone_lazy(cbdata, env, cone, cb_n_cones);
 

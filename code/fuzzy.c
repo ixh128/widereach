@@ -25,6 +25,10 @@ double sample_dist(fuzzy_info_t *fuzzy_info, gsl_rng *rng) {
     return gsl_ran_exponential(rng, p);
   case STUDENT_T:
     return gsl_ran_tdist(rng, p);
+  case LOG_NORMAL:
+    return gsl_ran_lognormal(rng, 0, p);
+  case NORMAL:
+    return fabs(gsl_ran_gaussian(rng, p));
   }
 }
 

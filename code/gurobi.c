@@ -13,7 +13,8 @@
 #define TRY_MODEL_ON(premise) TRY(*state = premise, *state != 0, NULL)
 
 GRBmodel *init_gurobi_model(int *state, const env_t *env) {
-  GRBenv *p = NULL;
+  static GRBenv *p = NULL; // static so that we use the same model for
+                           // everything. however, this is not thread-safe.
 
   TRY_MODEL_ON(GRBemptyenv(&p));
 
@@ -21,7 +22,7 @@ GRBmodel *init_gurobi_model(int *state, const env_t *env) {
 
   // TRY_MODEL_ON(GRBsetintparam(p, "OutputFlag", 0));
 
-  TRY_MODEL_ON(GRBstartenv(p));
+  TRY_MODEL_ON(GRBstartenv(p)); // no problem to run this multiple times
 
   params_t *params = env->params;
   GRBmodel *model = NULL;
@@ -53,8 +54,14 @@ int add_gurobi_hyperplane(GRBmodel *model, size_t dimension, int biased) {
     ub[hyperplane_cnt - 1] = 0;
   }
 
-  return GRBaddvars(model, hyperplane_cnt, 0, NULL, NULL, NULL, NULL, lb, ub,
-                    NULL, varnames);
+  int state = GRBaddvars(model, hyperplane_cnt, 0, NULL, NULL, NULL, NULL, lb,
+                         ub, NULL, varnames);
+  free(lb);
+  free(ub);
+  for (int i = 0; i < hyperplane_cnt; i++)
+    free(varnames[i]);
+  free(varnames);
+  return state;
 }
 
 int add_gurobi_sample_var(GRBmodel *model, int label, char *name) {
@@ -110,8 +117,8 @@ void gurobi_indices(sparse_vector_t *v) {
   }
 }
 
-int add_gurobi_sample_constr(GRBmodel *model, sample_locator_t locator,
-                             int label, char *name, const env_t *env) {
+int add_gurobi_sample_constr_standard(GRBmodel *model, sample_locator_t locator,
+                                      int label, char *name, const env_t *env) {
   // Set coefficients of w
   samples_t *samples = env->samples;
   int dimension = (int)samples->dimension;
@@ -130,8 +137,32 @@ int add_gurobi_sample_constr(GRBmodel *model, sample_locator_t locator,
 
   gurobi_indices(v);
 
-  return GRBaddconstr(model, v->len, v->ind + 1, v->val + 1, GRB_LESS_EQUAL,
-                      label_to_bound(label, env->params), name);
+  int state =
+      GRBaddconstr(model, v->len, v->ind + 1, v->val + 1, GRB_LESS_EQUAL,
+                   label_to_bound(label, env->params), name);
+  free(delete_sparse_vector(v));
+  return state;
+}
+
+int add_gurobi_sample_constr(GRBmodel *model, sample_locator_t locator,
+                             int label, char *name, const env_t *env) {
+  switch (env->params->gurobi_params->constr_type) {
+  case STANDARD_CONSTR:
+    TRY_STATE(
+        add_gurobi_sample_constr_standard(model, locator, label, name, env));
+    break;
+  case BILINEAR:
+    TRY_STATE(add_gurobi_sample_constr(model, locator, label, name, env));
+    break;
+  case THRESHOLD:
+    TRY_STATE(add_gurobi_thr_constr(model, name));
+    break;
+  default:
+    printf("unsupported constraint type, using default\n");
+    TRY_STATE(add_gurobi_sample_constr(model, locator, label, name, env));
+  }
+
+  return 0;
 }
 
 int add_gurobi_sample_constr_bilinear(GRBmodel *model, sample_locator_t locator,
@@ -301,10 +332,18 @@ int add_gurobi_sample(GRBmodel *model, sample_locator_t locator,
   snprintf(name, NAME_LEN_MAX, "%c%u", label_to_varname(label),
            (unsigned int)locator.index + 1);
 
-  // Add sample decision variable
-  TRY_STATE(add_gurobi_sample_var(model, label, name));
+  switch (env->params->gurobi_params->var_type) {
+  case BIN:
+    TRY_STATE(add_gurobi_sample_var(model, label, name));
+    break;
+  case CONT:
+    TRY_STATE(add_gurobi_sample_var_cont(model, label, name));
+    break;
+  default:
+    printf("unsupported var type; using default\n");
+    TRY_STATE(add_gurobi_sample_var(model, label, name));
+  }
 
-  // Add sample constraint
   return add_gurobi_sample_constr(model, locator, label, name, env);
 }
 
@@ -431,9 +470,11 @@ int add_gurobi_precision(GRBmodel *model, const env_t *env) {
   double theta = params->theta;
   sparse_vector_t *constraint = precision_row(env->samples, theta);
   gurobi_indices(constraint);
-  return GRBaddconstr(model, constraint->len, constraint->ind + 1,
-                      constraint->val + 1, GRB_LESS_EQUAL,
-                      -theta * params->epsilon_precision, "V");
+  int state = GRBaddconstr(model, constraint->len, constraint->ind + 1,
+                           constraint->val + 1, GRB_LESS_EQUAL,
+                           -theta * params->epsilon_precision, "V");
+  free(delete_sparse_vector(constraint));
+  return state;
 }
 
 int add_gurobi_precision_weak(GRBmodel *model, const env_t *env) {
@@ -698,19 +739,21 @@ int add_gurobi_precision_thr(GRBmodel *model, const env_t *env) {
 
 GRBmodel *gurobi_milp(int *state, const env_t *env) {
   samples_t *samples = env->samples;
+  gurobi_params_t *p = env->params->gurobi_params;
   TRY_MODEL(!is_binary(samples))
   GRBmodel *model = init_gurobi_model(state, env);
   TRY_MODEL(NULL == model)
 
-  TRY_MODEL_ON(add_gurobi_hyperplane(model, samples->dimension, 1))
+  TRY_MODEL_ON(add_gurobi_hyperplane(model, samples->dimension, !p->unbiased));
 
-  TRY_MODEL_ON(add_gurobi_samples(model, env))
+  TRY_MODEL_ON(add_gurobi_samples(model, env));
 
   TRY_MODEL_ON(add_gurobi_precision(model, env))
-  // TRY_MODEL_ON(add_gurobi_precision_weak(model, env))
-  // TRY_MODEL_ON(add_gurobi_precision_linbar(model, env))
-  // TRY_MODEL_ON(add_gurobi_precision_exp_bar(model, env));
-  // TRY_MODEL_ON(add_gurobi_precision_piecewise_exp_bar(model, env));
+  // TRY_MODEL_ON(add_gurobi_precision_strict(model, env))
+  //  TRY_MODEL_ON(add_gurobi_precision_weak(model, env))
+  //  TRY_MODEL_ON(add_gurobi_precision_linbar(model, env))
+  //  TRY_MODEL_ON(add_gurobi_precision_exp_bar(model, env));
+  //  TRY_MODEL_ON(add_gurobi_precision_piecewise_exp_bar(model, env));
   int nvars;
 
   GRBupdatemodel(model);

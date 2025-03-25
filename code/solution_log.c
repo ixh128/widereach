@@ -49,3 +49,5 @@ void print_solution_log(solution_log_t *log) {
     printf("%8.3f, %8.3f,\n", log->times[i], log->objs[i]);
   }
 }
+
+void clear_solution_log(solution_log_t *log) { log->n_pts = 0; }

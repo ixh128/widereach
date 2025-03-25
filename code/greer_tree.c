@@ -700,7 +700,7 @@ void create_node_child(env_t *env, tnode *node, sample_locator_t loc,
   if (!env->params->greer_params.classify_cuda) {
     child->data->res = classify(env, child->data->v);
     child->score = score(env, child);
-    printf("child has score %g\n", child->score);
+    // printf("child has score %g\n", child->score);
   }
 
   if (env->params->greer_params.bnb) {
@@ -1632,6 +1632,8 @@ hplane_list *gr_explore(env_t *env, gsl_vector *v0, hplane_list *A) {
       best_obj = curr->data->res.obj;
       best_v = curr->data->v;
       printf("new best soln with objective %g\n", best_obj);
+      printf("TP = %d, FP = %d\n", curr->data->res.ntpos,
+             curr->data->res.nfpos);
       print_vec(best_v);
     }
 
@@ -2097,6 +2099,10 @@ hplane_list *beam_search(env_t *env, gsl_vector *v0, hplane_list *A) {
       printf("time\n");
       break;
       }*/
+    if (best_obj == positives(env->samples)) {
+      printf("found perfect hyperplane, quitting early\n");
+      break;
+    }
     printf("depth = %d\n", beam[0]->depth);
     /*printf("beam:\n");
       print_beam(beam, width);*/

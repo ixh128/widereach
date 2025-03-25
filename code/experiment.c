@@ -202,6 +202,274 @@ void write_prisms() {
   }
 }
 
+int gcd(int a, int b) {
+  int result = ((a < b) ? a : b);
+  while (result > 0) {
+    if (a % result == 0 && b % result == 0) {
+      break;
+    }
+    result--;
+  }
+  return result;
+}
+
+void explore_pareto_curve(unsigned int *seed, env_t *env,
+                          samples_t *samples_validation) {
+  // the same as the above, but runs it for 5 different seeds and keeps all
+  // results
+  // if samples_validation is NULL, it will just not be used
+  double *h;
+  double orig_theta = env->params->theta;
+  double orig_lambda = env->params->lambda;
+  double orig_epsp = env->params->epsilon_positive;
+  double orig_epsn = env->params->epsilon_negative;
+  double step;
+  int n_iters = 0;
+  int n_seeds = 5;
+
+  for (double theta = 0.0; theta <= 1.0; theta += step) {
+    if (theta < 0.4)
+      step = 0.02;
+    else
+      step = 0.2;
+    n_iters++;
+  }
+  printf("trying %d theta values\n", n_iters);
+
+  struct {
+    double theta;
+    unsigned int tr_reach;
+    double tr_prec;
+    unsigned int vl_reach;
+    double vl_prec;
+    unsigned int seed_used;
+  } results[n_iters * n_seeds];
+
+  env->params->gurobi_params->tm_lim = 120000;
+
+  int k = 0;
+  for (double theta = 0.0; theta <= 1.0; theta += step) {
+    if (theta < 0.4)
+      step = 0.02;
+    else if (theta >= 0.4)
+      step = 0.2;
+
+    printf("theta = %g\n", theta);
+    env->params->theta = theta;
+    int lambda_factor;
+    if (theta == 0)
+      lambda_factor = 0;
+    else
+      lambda_factor = 100 / gcd((int)(theta * 100), 100);
+    printf("lambda factor = %d\n", lambda_factor);
+    env->params->lambda = lambda_factor * (positives(env->samples) + 1);
+
+    for (int s = 0; s < n_seeds; s++) {
+      unsigned int seed_value = *seed + s;
+      h = single_gurobi_run(&seed_value, env);
+      if (h == NULL) {
+        // if gurobi doesn't find a solution, we make the solution data -1
+        printf("no soln\n");
+        results[k].theta = theta;
+        results[k].seed_used = seed_value;
+        results[k].tr_reach = -1;
+        results[k].tr_prec = -1;
+        results[k].vl_reach = -1;
+        results[k].vl_prec = -1;
+        continue;
+      }
+
+      env->params->epsilon_positive = 1e-10;
+      env->params->epsilon_negative = 1e-10;
+
+      double *tr_soln = blank_solution(env->samples);
+      hyperplane_to_solution(h + 1, tr_soln, env);
+      results[k].tr_reach = reach(tr_soln, env->samples);
+      results[k].tr_prec = precision(tr_soln, env->samples);
+      free(tr_soln);
+
+      if (samples_validation) {
+        double *vl_soln = blank_solution(samples_validation);
+        hyperplane_to_solution_parts(h + 1, vl_soln, env->params,
+                                     samples_validation);
+        results[k].vl_reach = reach(vl_soln, samples_validation);
+        results[k].vl_prec = precision(vl_soln, samples_validation);
+        free(vl_soln);
+      }
+      if (samples_validation) {
+        printf("  Theta   | Train Reach | Train Precision | Val Reach  | Val "
+               "Precision | Seed Used  \n");
+        printf("---------------------------------------------------------------"
+               "----"
+               "------------\n");
+        for (int i = 0; i < k; i++) {
+          printf("  %.2f   , %12d , %14.4f , %10d , %13.4f , %10u \n",
+                 results[i].theta, results[i].tr_reach, results[i].tr_prec,
+                 results[i].vl_reach, results[i].vl_prec, results[i].seed_used);
+        }
+      } else {
+        printf("  Theta   | Reach      | Precision   | Seed Used  \n");
+        printf("-------------------------------------------------\n");
+        for (int i = 0; i < k; i++) {
+          printf("  %.2f   , %10d , %10.4f , %10u \n", results[i].theta,
+                 results[i].tr_reach, results[i].tr_prec, results[i].seed_used);
+        }
+      }
+
+      env->params->epsilon_positive = orig_epsp;
+      env->params->epsilon_negative = orig_epsn;
+
+      results[k].theta = theta;
+      results[k].seed_used = seed_value;
+
+      free(h);
+      k++;
+    }
+  }
+
+  if (samples_validation) {
+    printf("  Theta   | Train Reach | Train Precision | Val Reach  | Val "
+           "Precision | Seed Used  \n");
+    printf("-------------------------------------------------------------------"
+           "------------\n");
+    for (int i = 0; i < k; i++) {
+      printf("  %.2f   , %12d , %14.4f , %10d , %13.4f , %10u \n",
+             results[i].theta, results[i].tr_reach, results[i].tr_prec,
+             results[i].vl_reach, results[i].vl_prec, results[i].seed_used);
+    }
+  } else {
+    printf("  Theta   | Reach      | Precision   | Seed Used  \n");
+    printf("-------------------------------------------------\n");
+    for (int i = 0; i < k; i++) {
+      printf("  %.2f   , %10d , %10.4f , %10u \n", results[i].theta,
+             results[i].tr_reach, results[i].tr_prec, results[i].seed_used);
+    }
+  }
+
+  env->params->theta = orig_theta;
+  env->params->lambda = orig_lambda;
+}
+
+void explore_pareto_curve_greer(unsigned int *seed, env_t *env,
+                                samples_t *samples_validation) {
+  // the same as the above, but runs it for 5 different seeds and keeps all
+  // results
+  // if samples_validation is NULL, it will just not be used
+  double *h;
+  double orig_theta = env->params->theta;
+  double orig_lambda = env->params->lambda;
+  double orig_epsp = env->params->epsilon_positive;
+  double orig_epsn = env->params->epsilon_negative;
+  double step;
+  int n_iters = 0;
+  int n_seeds = 5;
+
+  for (double theta = 0.0; theta <= 1.0; theta += step) {
+    if (theta < 0.4)
+      step = 0.02;
+    else
+      step = 0.2;
+    n_iters++;
+  }
+  printf("trying %d theta values\n", n_iters);
+
+  struct {
+    double theta;
+    unsigned int tr_reach;
+    double tr_prec;
+    unsigned int vl_reach;
+    double vl_prec;
+    unsigned int seed_used;
+  } results[n_iters * n_seeds];
+
+  env->params->greer_params = (struct greer_params){.method = 2,
+                                                    .use_heapq = 0,
+                                                    .trunc = 0,
+                                                    .trim = 0,
+                                                    .max_heapq_size = -1,
+                                                    .mcts_ucb_const = 10,
+                                                    .beam_width = 100,
+                                                    .classify_cuda = 0,
+                                                    .obj_code = WRC,
+                                                    .no_displace = 0,
+                                                    .bnb = 0,
+                                                    .skip_rec = 1,
+                                                    .use_rel = 0};
+
+  int k = 0;
+  for (double theta = 0.0; theta <= 1.0; theta += step) {
+    if (theta < 0.4)
+      step = 0.02;
+    else if (theta >= 0.4)
+      step = 0.2;
+
+    printf("theta = %g\n", theta);
+    env->params->theta = theta;
+    int lambda_factor;
+    if (theta == 0)
+      lambda_factor = 0;
+    else
+      lambda_factor = 100 / gcd((int)(theta * 100), 100);
+    printf("lambda factor = %d\n", lambda_factor);
+    env->params->lambda = lambda_factor * (positives(env->samples) + 1);
+
+    for (int s = 0; s < n_seeds; s++) {
+      unsigned int seed_value = *seed + s;
+      // h = single_gurobi_run(&seed_value, env);
+      h = best_random_hyperplane_unbiased(1, env);
+      h = single_greer_run(env, h);
+
+      env->params->epsilon_positive = 1e-10;
+      env->params->epsilon_negative = 1e-10;
+
+      double *tr_soln = blank_solution(env->samples);
+      hyperplane_to_solution(h, tr_soln, env);
+      results[k].tr_reach = reach(tr_soln, env->samples);
+      results[k].tr_prec = precision(tr_soln, env->samples);
+      free(tr_soln);
+
+      if (samples_validation) {
+        double *vl_soln = blank_solution(samples_validation);
+        hyperplane_to_solution_parts(h, vl_soln, env->params,
+                                     samples_validation);
+        results[k].vl_reach = reach(vl_soln, samples_validation);
+        results[k].vl_prec = precision(vl_soln, samples_validation);
+        free(vl_soln);
+      }
+
+      env->params->epsilon_positive = orig_epsp;
+      env->params->epsilon_negative = orig_epsn;
+
+      results[k].theta = theta;
+      results[k].seed_used = seed_value;
+
+      free(h);
+      k++;
+    }
+  }
+
+  if (samples_validation) {
+    printf("  Theta   | Train Reach | Train Precision | Val Reach  | Val "
+           "Precision | Seed Used  \n");
+    printf("-------------------------------------------------------------------"
+           "------------\n");
+    for (int i = 0; i < k; i++) {
+      printf("  %.2f   , %12d , %14.4f , %10d , %13.4f , %10u \n",
+             results[i].theta, results[i].tr_reach, results[i].tr_prec,
+             results[i].vl_reach, results[i].vl_prec, results[i].seed_used);
+    }
+  } else {
+    printf("  Theta   | Reach      | Precision   | Seed Used  \n");
+    printf("-------------------------------------------------\n");
+    for (int i = 0; i < k; i++) {
+      printf("  %.2f   , %10d , %10.4f , %10u \n", results[i].theta,
+             results[i].tr_reach, results[i].tr_prec, results[i].seed_used);
+    }
+  }
+
+  env->params->theta = orig_theta;
+  env->params->lambda = orig_lambda;
+}
 typedef struct exp_res_t {
   double reach;
   double prec;
@@ -223,10 +491,13 @@ exp_res_t experiment(int param_setting) {
    * crop mapping  .99 (76, 0.974359);
    * */
   env.params->theta = 0.1;
-  double lambda_factor = 10;
+  // double lambda_factor = 10;
+  // should always be an integer:
+  double lambda_factor = 100.0 / gcd((int)(env.params->theta * 100), 100);
+
   env.params->branch_target = 0.0;
   env.params->iheur_method = simple;
-  int n = 5940;
+  int n = 33 * 180;
   // env.params->lambda = 100 * (n + 1);
   env.params->rnd_trials = 10000;
   // env.params->rnd_trials_cont = 10;
@@ -284,10 +555,15 @@ exp_res_t experiment(int param_setting) {
                              .dimension = dimension,
                              .dist_dims = dist_dims,
                              .max_rad = 1,
-                             .dist = EXP,
-                             .rad = 0.75,
-                             .param = 1.8,
+                             .dist = LOG_NORMAL,
+                             .rad = 0.72,
+                             .param = 7.38218,
                              .norm = 1};
+  size_t P_val = 32; // num of positives for validation (to mimic white wine)
+  fuzzy_info_t fuzzy_info_val;
+  memcpy(&fuzzy_info_val, &fuzzy_info, sizeof(fuzzy_info_t));
+  fuzzy_info_val.count = P_val * 33;
+  fuzzy_info_val.positives = P_val;
 
   // fuzzy_info.param = compute_param(dist_dims, 32, 8, fuzzy_info.rad,
   // fuzzy_info.dist); exit(0);
@@ -300,23 +576,22 @@ exp_res_t experiment(int param_setting) {
   // samples_validation = random_samples(n, n / 2, dimension);
   // samples_validation = random_sample_clusters(clusters);
   // samples_validation = random_simplex_samples(&simplex_info);
+  samples_validation = random_fuzzy_samples(&fuzzy_info_val);
   FILE *infile;
   infile =
       // fopen("../../data/breast-cancer/wdbc-validation.dat", "r");
       // fopen("../../data/wine-quality/winequality-red-validation.dat", "r");
-      // fopen("../../data/wine-quality/red-cross/winequality-red-2-validation.dat",
-      // "r"); fopen("../../data/wine-quality/winequality-white-validation.dat",
-      // "r");
-      // fopen("../../data/wine-quality/white-cross/winequality-white-2-validation.dat",
-      // "r");
-      fopen("../../data/south-german-credit/SouthGermanCredit-validation.dat",
-            "r");
+      // fopen("../../data/wine-quality/red-cross/winequality-red-2-validation.dat","r");
+      fopen("../../data/wine-quality/winequality-white-validation.dat", "r");
+  // fopen("../../data/wine-quality/white-cross/winequality-white-2-validation.dat","r");
+  // fopen("../../data/south-german-credit/SouthGermanCredit-validation.dat",
+  // "r");
   // fopen("../../data/south-german-credit/cross/SouthGermanCredit-2-validation.dat",
   // "r"); fopen("../../data/crops/small-sample-validation.dat", "r");
   // fopen("../../data/crops/cross/small-sample-2-validation.dat", "r");
   // fopen("../../data/finance_data/finance-valid.dat", "r");
   //  fopen("./sample.dat", "r");
-  samples_validation = read_binary_samples(infile);
+  // samples_validation = read_binary_samples(infile);
   fclose(infile);
   /* glp_printf("Validation\n");
   print_samples(samples_validation);
@@ -335,8 +610,8 @@ exp_res_t experiment(int param_setting) {
   double *precisions = CALLOC(ntests, double);
   int k = 0;
 
-  for (int s = 0; s < SAMPLE_SEEDS; s++) {
-    // for (int s = 0; s < 1; s++) {
+  // for (int s = 0; s < SAMPLE_SEEDS; s++) {
+  for (int s = 0; s < 1; s++) {
     srand48(samples_seeds[s]);
     printf("Sample seed: %lu\n", samples_seeds[s]);
 
@@ -344,14 +619,13 @@ exp_res_t experiment(int param_setting) {
     // samples = random_samples(n, n / 2, dimension);
     // samples = random_sample_clusters(clusters);
     // samples = random_simplex_samples(&simplex_info);
-    samples = random_prism_samples(&simplex_info, simplex_dims);
+    // samples = random_prism_samples(&simplex_info, simplex_dims);
     // samples = random_fuzzy_samples(&fuzzy_info);
     infile =
         // fopen("../../data/breast-cancer/wdbc-training.dat", "r");
         // fopen("../../data/wine-quality/winequality-red-training.dat", "r");
-        // fopen("../../data/wine-quality/red-cross/winequality-red-2-training.dat",
-        // "r"); fopen("../../data/wine-quality/winequality-white-training.dat",
-        // "r");
+        // fopen("../../data/wine-quality/red-cross/winequality-red-2-training.dat","r");
+        // fopen("../../data/wine-quality/winequality-white-training.dat", "r");
         // fopen("../../data/wine-quality/white-cross/winequality-white-2-training.dat",
         // "r");
         // fopen("../../data/south-german-credit/SouthGermanCredit-training.dat",
@@ -366,51 +640,53 @@ exp_res_t experiment(int param_setting) {
         //  fopen("./small-sample.dat", "r");
         // full data sets:
         // fopen("../../data/breast-cancer/wdbc.dat", "r");
-        // fopen("../../data/wine-quality/white-cross/winequality-white-1.dat",
-        // "r");
+        // fopen("../../data/wine-quality/winequality-red.dat", "r");
         fopen("../../data/wine-quality/white-cross/winequality-white-1.dat",
               "r");
     // fopen("../../data/south-german-credit/SouthGermanCredit.dat", "r");
     // fopen("../../data/crops/small-sample.dat", "r");
     // PCA (d=5):
     // fopen("../../data/breast-cancer/wdbc.dat", "r");
-    // fopen("../../data/wine-quality/red-cross/winequality-red.dat", "r");
-    // fopen("../../data/wine-quality/white-cross/winequality-white-1_pca5.dat",
-    // "r");
-    // fopen("../../data/wine-quality/white-cross/winequality-white-1_pca10.dat",
-    // "r"); fopen("../../data/south-german-credit/SouthGermanCredit_pca5.dat",
-    // "r");
-    // fopen("../../data/south-german-credit/SouthGermanCredit_pca5_affine.dat",
-    // "r"); fopen("../../data/crops/small-sample_pca5.dat", "r"); generated
-    // datasets: fopen("../../instance_generation/instance_1.dat", "r");
-    // fopen("../../instance_generation/instance_1_pca15.dat", "r");
-    // fopen("../../instance_generation/instance_3.dat", "r");
-    // fopen("../../instance_generation/instance_3_pca15.dat", "r");
-    // SGC encodings:
-    // fopen("../../data/south-german-credit/SGC_full.dat", "r");
-    // crops classes:
-    // fopen("../../data/crops/small-sample-broadleaf.dat", "r");
-    // fopen("../../data/crops/small-sample-canola.dat", "r");
-    // fopen("../../data/crops/small-sample-corn.dat", "r");
-    // fopen("../../data/crops/small-sample-oat.dat", "r");
-    // fopen("../../data/crops/small-sample-pea.dat", "r");
-    // fopen("../../data/crops/small-sample-soy.dat", "r");
-    // fopen("../../data/crops/small-sample-wheat.dat", "r");
-    // new datasets:
-    // fopen("../../data/rice/rice.dat", "r");
-    // fopen("../../data/crops/small-sample-corn.dat", "r");
-    // fopen("../../data/wine-quality/white-cross/winequality-white-1-dedup.dat",
-    // "r"); fopen("../../data/glass/glass.dat", "r");
-    // fopen("../../data/lympho/lympho.dat", "r");
-    // fopen("../../data/vowels/vowels.dat", "r");
-    // fopen("../../data/thyroid/thyroid.dat", "r");
-    // SMOTE results:
-    // fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.5.dat",
-    // "r");
-    // fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.3.dat",
-    // "r");
+    //  fopen("../../data/wine-quality/red-cross/winequality-red.dat",
+    //  "r");
+    //  fopen("../../data/wine-quality/white-cross/winequality-white-1_pca5.dat",
+    //  "r");
+    //  fopen("../../data/wine-quality/white-cross/winequality-white-1_pca10.dat",
+    //  "r");
+    //  fopen("../../data/south-german-credit/SouthGermanCredit_pca5.dat",
+    //  "r");
+    //  fopen("../../data/south-german-credit/SouthGermanCredit_pca5_affine.dat",
+    //  "r"); fopen("../../data/crops/small-sample_pca5.dat", "r");
+    //  generated datasets:
+    //  fopen("../../instance_generation/instance_1.dat", "r");
+    //  fopen("../../instance_generation/instance_1_pca15.dat", "r");
+    //  fopen("../../instance_generation/instance_3.dat", "r");
+    //  fopen("../../instance_generation/instance_3_pca15.dat", "r");
+    //  SGC encodings:
+    //  fopen("../../data/south-german-credit/SGC_full.dat", "r");
+    //  crops classes:
+    //  fopen("../../data/crops/small-sample-broadleaf.dat", "r");
+    //  fopen("../../data/crops/small-sample-canola.dat", "r");
+    //  fopen("../../data/crops/small-sample-corn.dat", "r");
+    //  fopen("../../data/crops/small-sample-oat.dat", "r");
+    //  fopen("../../data/crops/small-sample-pea.dat", "r");
+    //  fopen("../../data/crops/small-sample-soy.dat", "r");
+    //  fopen("../../data/crops/small-sample-wheat.dat", "r");
+    //  new datasets:
+    //  fopen("../../data/rice/rice.dat", "r");
+    //  fopen("../../data/crops/small-sample-corn.dat", "r");
+    //  fopen("../../data/wine-quality/white-cross/winequality-white-1-dedup.dat",
+    //  "r"); fopen("../../data/glass/glass.dat", "r");
+    //  fopen("../../data/lympho/lympho.dat", "r");
+    //  fopen("../../data/vowels/vowels.dat", "r");
+    //  fopen("../../data/thyroid/thyroid.dat", "r");
+    //  SMOTE results:
+    //  fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.5.dat",
+    //  "r");
+    //  fopen("../../data/wine-quality/white-cross/winequality-white-1_smote_0.3.dat",
+    //  "r");
 
-    // samples = read_binary_samples(infile);
+    samples = read_binary_samples(infile);
     fclose(infile);
     // write_samples(samples, "1prism11_4900_noise0_scale0.dat");
     // exit(0);
@@ -429,7 +705,7 @@ exp_res_t experiment(int param_setting) {
     //	print_samples(samples);
     n = samples_total(samples);
     size_t P = positives(samples);
-    env.params->lambda = lambda_factor * (n + 1);
+    env.params->lambda = lambda_factor * (P + 1);
     // env.params->lambda = 1;
     env.params->epsilon_precision = 3. / 990;
     // env.params->epsilon_precision = 3000./990000;
@@ -446,7 +722,8 @@ exp_res_t experiment(int param_setting) {
     /*env.params->epsilon_positive = 1e-5;
       env.params->epsilon_negative = 1e-5;*/
 
-    for (int t = 0; t < MIP_SEEDS; t++) {
+    // for (int t = 0; t < MIP_SEEDS; t++) {
+    for (int t = 0; t < 5; t++) {
       // for (int t = 0; t < 1; t++) {
       //  if (0) { int t=0;
       //  for (int t = 0; t < 6; t++) {
@@ -462,7 +739,7 @@ exp_res_t experiment(int param_setting) {
       env.samples = flip_negatives(env.samples);
       env.params->theta = 1;
       env.params->epsilon_precision = 0;
-      gurobi_param p = {
+      gurobi_params_t p = {
           .threads = 0,
           .MIPFocus = 0,
           .ImproveStartGap = 0,
@@ -482,21 +759,30 @@ exp_res_t experiment(int param_setting) {
       double *soln1 = blank_solution(samples);
       double obj1 = hyperplane_to_solution(h+1, soln1, &env);
 
-      printf("obj %g, prec %g, reach %d\n", obj1, precision(soln1, samples),
-      reach(soln1, samples)); printf("Objective = %0.3f\n", h[0]);
-      printf("Hyperplane: ");
-      for(int i = 0; i <= samples->dimension+1; i++)
-        printf("%g%s", h[i], (i == samples->dimension+1) ? "\n" : " ");
+      printf("obj %g, prec %g, reach %d\n", obj1, precision(soln1,
+      samples), reach(soln1, samples)); printf("Objective = %0.3f\n",
+      h[0]); printf("Hyperplane: "); for(int i = 0; i <=
+      samples->dimension+1; i++) printf("%g%s", h[i], (i ==
+      samples->dimension+1) ? "\n" : " ");
 
         exit(0);*/
 
       // check the prism cut hplane
-      double *w = prism_cut_hplane(&simplex_info, simplex_dims);
-      // double *w = l1_cut_hplane(&fuzzy_info);
+      // double *w = prism_cut_hplane(&simplex_info, simplex_dims);
+      /*double *w = l1_cut_hplane(&fuzzy_info);
       double *prism_soln = blank_solution(samples);
       double p_obj = hyperplane_to_solution(w, prism_soln, &env);
       printf("prism cut: reach = %d, precision = %g\n",
-             reach(prism_soln, samples), precision(prism_soln, samples));
+             reach(prism_soln, samples), precision(prism_soln,
+      samples));
+      */
+
+      // add_bias(samples);
+      //  normalize_samples(samples);
+      // add_bias(samples_validation);
+      explore_pareto_curve(seed, &env, samples_validation);
+      exit(0);
+      //
 
       // Training results testing:
       if (param_setting <= 0) {
@@ -507,28 +793,30 @@ exp_res_t experiment(int param_setting) {
         // normalize_samples(samples);
         // print_samples(samples);
 
-        env.params->greer_params = (struct greer_params){.method = 0,
+        env.params->greer_params = (struct greer_params){.method = 2,
                                                          .use_heapq = 0,
                                                          .trunc = 0,
                                                          .trim = 0,
                                                          .max_heapq_size = -1,
-                                                         .mcts_ucb_const = 100,
+                                                         .mcts_ucb_const = 10,
                                                          .beam_width = 10,
                                                          .classify_cuda = 0,
                                                          .obj_code = WRC,
                                                          .no_displace = 0,
                                                          .bnb = 0,
                                                          .skip_rec = 1,
-                                                         .use_rel = 1};
+                                                         .use_rel = 0};
 
         h = best_random_hyperplane_unbiased(1, &env);
-        h = single_greer_run(&env, h);
+        // h = single_greer_run(&env, h);
+        h = single_siman_run(seed, 250, &env, h) + 1;
 
         /*double obj = hyperplane_to_solution(h, NULL, &env);
         printf("Solved. Obj = %g\n", obj);
         printf("Hyperplane: ");
         for(int i = 0; i < env.samples->dimension; i++)
-        printf("%g%s", h[i], (i == env.samples->dimension - 1) ? "\n" : " ");*/
+        printf("%g%s", h[i], (i == env.samples->dimension - 1) ? "\n"
+        : " ");*/
         // free(delete_samples(samples));
         // free(h);
         // exit(0);
@@ -548,23 +836,15 @@ exp_res_t experiment(int param_setting) {
         normalize_samples(samples_validation);*/
 
         // h = best_random_hyperplane_unbiased(1, &env);
-        gurobi_param p = {.threads = 0,
-                          .MIPFocus = 0,
-                          .ImproveStartGap = 0,
-                          .ImproveStartTime = GRB_INFINITY,
-                          .VarBranch = 0,
-                          .Heuristics = 0.05,
-                          .Cuts = -1,
-                          .RINS = -1,
-                          .method = 0,
-                          .init = NULL,
-                          .pos_prio = 0,
-                          .force_pos = 0};
 
-        env.params->c = 1;
-        h = single_gurobi_run(seed, 120000, 1200, &env, &p);
+        gurobi_params_t *p = env.params->gurobi_params;
+        p->tm_lim = 180000;
+        // p->method = 2;
+        clear_solution_log(env.solution_log);
+        h = single_gurobi_run(seed, &env);
 
-        env.params->epsilon_positive = env.params->epsilon_negative = 0;
+        // env.params->epsilon_positive = env.params->epsilon_negative
+        // = 0;
         double *soln = blank_solution(samples);
         double obj = hyperplane_to_solution(h + 1, soln, &env);
 
@@ -575,7 +855,8 @@ exp_res_t experiment(int param_setting) {
         for (int i = 0; i <= samples->dimension + 1; i++)
           printf("%g%s", h[i], (i == samples->dimension + 1) ? "\n" : " ");
 
-        h++; // so that making the solution below works (small memory leak)
+        // h++; // so that making the solution below works (small memory
+        //  leak)
 
         print_solution_log(env.solution_log);
       } else if (param_setting == 2) {
@@ -627,22 +908,6 @@ exp_res_t experiment(int param_setting) {
         add_bias(samples);
         // normalize_samples(samples);
 
-        /*gurobi_param p2 = {
-          .threads = 1,
-          .MIPFocus = 0,
-          .ImproveStartGap = 0,
-          .ImproveStartTime = GRB_INFINITY,
-          .VarBranch = -1,
-          .Heuristics = 0.05,
-          .Cuts = -1,
-          .RINS = -1,
-          .method = 7,
-          .init = NULL
-        };
-        h = single_gurobi_run(seed, 1200000000, 1200, &env, &p2);
-        exit(0);
-        */
-
         // testing the full search procedure:
         int **cones = CALLOC(16, int *);
         int max_cones = 16;
@@ -655,7 +920,7 @@ exp_res_t experiment(int param_setting) {
           }
           if (n_cones == 0) {
             h = best_random_hyperplane_unbiased(1, &env);
-            /*gurobi_param p = {
+            /*gurobi_params_t p = {
               .threads = 0,
               .MIPFocus = 0,
               .ImproveStartGap = 0,
@@ -690,21 +955,12 @@ exp_res_t experiment(int param_setting) {
           printf("\n");
           // break;
 
-          gurobi_param p = {.threads = 0,
-                            .MIPFocus = 0,
-                            .ImproveStartGap = 0,
-                            .ImproveStartTime = GRB_INFINITY,
-                            .VarBranch = -1,
-                            .Heuristics = 0.05,
-                            .Cuts = -1,
-                            .RINS = -1,
-                            .method = 6,
-                            .init = h,
-                            .cone = cone};
+          env.params->gurobi_params->init = h;
+          env.params->gurobi_params->cone = cone;
           env.params->epsilon_positive *= 2;
           env.params->epsilon_negative *= 2;
           env.params->epsilon_precision *= 2;
-          h = single_gurobi_run(seed, 120000, 1200, &env, &p);
+          h = single_gurobi_run(seed, &env);
           env.params->epsilon_positive /= 2;
           env.params->epsilon_negative /= 2;
           env.params->epsilon_precision /= 2;
@@ -721,7 +977,8 @@ exp_res_t experiment(int param_setting) {
                  "---------------------------------------\n");
           printf("%d cones found so far\n", n_cones);
           printf("best objective = %g\n", best_obj);
-          printf("-------------------------------------------------------------"
+          printf("---------------------------------------------------"
+                 "----------"
                  "---------------------\n");
           // if(n_cones == 2) break;
         }
@@ -729,16 +986,6 @@ exp_res_t experiment(int param_setting) {
 
       } else if (param_setting == 6) {
         // testing different values
-        gurobi_param p = {.threads = 0,
-                          .MIPFocus = 0,
-                          .ImproveStartGap = 0,
-                          .ImproveStartTime = GRB_INFINITY,
-                          .VarBranch = 0,
-                          .Heuristics = 0.05,
-                          .Cuts = -1,
-                          .RINS = -1,
-                          .method = 0,
-                          .init = NULL};
 
         double cs[7] = {0.01, 0.1, 1, 5, 10, 100, 1000};
         double objs[7];
@@ -751,13 +998,14 @@ exp_res_t experiment(int param_setting) {
         for (int i = 0; i < 7; i++) {
           env.params->c = cs[i];
           time_t start = time(0);
-          h = single_gurobi_run(seed, tm_lim, 1200, &env, &p);
+          h = single_gurobi_run(seed, &env);
           if (!h) {
             objs[i] = reaches[i] = precisions[i] = times[i] = -1;
             continue;
           }
           time_t end = time(0);
-          // env.params->epsilon_positive = env.params->epsilon_negative = 0;
+          // env.params->epsilon_positive =
+          // env.params->epsilon_negative = 0;
 
           double *soln = blank_solution(samples);
           double obj = hyperplane_to_solution(h + 1, soln, &env);
@@ -783,10 +1031,10 @@ exp_res_t experiment(int param_setting) {
           free(soln);
           free(v_soln);
         }
-        printf(
-            "alpha |  time  |  obj  | t_reach | t_prec | v_reach | v_prec \n");
-        printf(
-            "--------------------------------------------------------------\n");
+        printf("alpha |  time  |  obj  | t_reach | t_prec | v_reach "
+               "| v_prec \n");
+        printf("-----------------------------------------------------"
+               "---------\n");
         for (int i = 0; i < 7; i++) {
           printf("%6g | %6ld | %5g | %7g | %6g | %7g | %6g\n", cs[i], times[i],
                  objs[i], reaches[i], precisions[i], v_reaches[i],
@@ -798,9 +1046,9 @@ exp_res_t experiment(int param_setting) {
         exit(1);
       }
       // remove these in actual testing
-      env.params->epsilon_positive = 1e-10;
-      env.params->epsilon_negative = 1e-10;
-      env.params->epsilon_precision = 1e-10;
+      // env.params->epsilon_positive = 1e-10;
+      // env.params->epsilon_negative = 1e-10;
+      // env.params->epsilon_precision = 1e-10;
 
       double *soln = blank_solution(samples);
       double obj = hyperplane_to_solution(h, soln, &env);
@@ -828,7 +1076,6 @@ exp_res_t experiment(int param_setting) {
       printf("Validation: %u\t%lg\n", reach(valid, samples_validation),
              precision(valid, samples_validation));
 
-      exit(0);
       k++;
       free(h);
       free(soln);

@@ -132,8 +132,7 @@ int nfeas = 0;
 
 double switch_time = -1;
 
-double *single_gurobi_run(unsigned int *seed, int tm_lim, int tm_lim_tune,
-                          env_t *env, gurobi_param *param_setting) {
+double *single_gurobi_run(unsigned int *seed, env_t *env) {
   samples_t *samples = env->samples;
   env->solution_data = solution_data_init(samples_total(samples));
 
@@ -142,14 +141,15 @@ double *single_gurobi_run(unsigned int *seed, int tm_lim, int tm_lim_tune,
     srand48(*seed);
   }
 
+  gurobi_params_t *p = env->params->gurobi_params;
+  if (!p)
+    p = gurobi_params_default();
+  int tm_lim = p->tm_lim;
+  int tm_lim_tune = p->tm_lim_tune;
+  int method = p->method;
+
   int state;
   GRBmodel *model;
-  int method;
-  if (!param_setting) {
-    method = 0;
-  } else {
-    method = param_setting->method;
-  }
   switch (method) {
   case 0:
     TRY_MODEL(model = gurobi_milp(&state, env), "model creation");
@@ -170,23 +170,21 @@ double *single_gurobi_run(unsigned int *seed, int tm_lim, int tm_lim_tune,
     TRY_MODEL(model = gurobi_relaxation(&state, env), "model creation");
     break;
   case 5:
-    if (!param_setting->init) {
+    if (!p->init) {
       printf("no initial solution provided\n");
       return NULL;
     }
-    TRY_MODEL(model = gurobi_relax_within_small_cone(&state, env,
-                                                     param_setting->init),
+    TRY_MODEL(model = gurobi_relax_within_small_cone(&state, env, p->init),
               "model creation");
     /*TRY_MODEL(state = GRBcomputeIIS(model), "IIS");
       TRY_MODEL(state = GRBwrite(model, "tmp.ilp"), "write out");*/
     break;
   case 6:
-    if (!param_setting->cone) {
+    if (!p->cone) {
       printf("no cone provided\n");
       return NULL;
     }
-    TRY_MODEL(model =
-                  gurobi_relax_within_cone(&state, env, param_setting->cone),
+    TRY_MODEL(model = gurobi_relax_within_cone(&state, env, p->cone),
               "model creation");
     break;
   case 7:
@@ -196,9 +194,8 @@ double *single_gurobi_run(unsigned int *seed, int tm_lim, int tm_lim_tune,
       "LazyConstraints", 1), "allow lazy constraints");*/
     break;
   case 8:
-    TRY_MODEL(model = gurobi_relax_within_subspace(&state, env,
-                                                   param_setting->ortho.basis,
-                                                   param_setting->ortho.n),
+    TRY_MODEL(model = gurobi_relax_within_subspace(&state, env, p->ortho.basis,
+                                                   p->ortho.n),
               "model creation");
     break;
   case 9:
@@ -224,6 +221,10 @@ double *single_gurobi_run(unsigned int *seed, int tm_lim, int tm_lim_tune,
 
   // TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "ScaleFlag", 3), "set
   // scale flag");
+
+  if (seed)
+    TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "Seed", *seed),
+              "set seed");
 
   TRY_MODEL(state = GRBsetdblparam(GRBgetenv(model), "TuneTimeLimit",
                                    tm_lim_tune / 1000.),
@@ -254,10 +255,9 @@ int nresults;
 TRY_MODEL(state = GRBgetintattr(model, "TuneResultCount", &nresults), "get tune
 results"); if(nresults > 0) TRY_MODEL(state = GRBgettuneresult(model, 0), "apply
 tuning"); GRBwrite(model, "post.prm");*/
-  if (param_setting->init) {
+  if (p->init) {
     TRY_MODEL(state = GRBsetdblattrarray(model, GRB_DBL_ATTR_START, 0,
-                                         env->samples->dimension,
-                                         param_setting->init),
+                                         env->samples->dimension, p->init),
               "set start hyperplane");
   } else if (method == 1 || method == 8) {
     ;
@@ -321,13 +321,6 @@ tuning"); GRBwrite(model, "post.prm");*/
               "set start");
 
   } else if (method == 3 || method == 7) {
-    /*env->params->epsilon_positive = 0;
-    env->params->epsilon_negative = 0;
-    gurobi_param p = {0, 0, 0, GRB_INFINITY, -1, 0.15, -1, 2};
-    double *h = single_gurobi_run(seed, 5000, 1200, env, &p);
-    printf("Hyperplane: ");
-    for(int i = 0; i < env->samples->dimension+1; i++)
-    printf("%0.3f%s", h[i], (i == env->samples->dimension) ? "\n" : " ");*/
 
     double *h = best_random_hyperplane_unbiased(1, env);
 
@@ -376,7 +369,7 @@ tuning"); GRBwrite(model, "post.prm");*/
     free(h);
     free(random_solution);
   } else {
-    /*printf("Generating best of %d hyperplanes\n", env->params->rnd_trials);
+    printf("Generating best of %d hyperplanes\n", env->params->rnd_trials);
     double *h = best_random_hyperplane(1, env);
     // double *h = CALLOC(env->samples->dimension+1, double);
     // double *h = single_exact_run(env);
@@ -401,11 +394,11 @@ tuning"); GRBwrite(model, "post.prm");*/
               "set start");
 
     free(h);
-    free(random_solution);*/
+    free(random_solution);
 
     // solve TGM for initial solution:
-    /*gurobi_param p2;
-    memcpy(&p2, param_setting, sizeof(gurobi_param));
+    /*gurobi_params_t p2;
+    memcpy(&p2, param_setting, sizeof(gurobi_params_t));
     p2.method = 10;
     double *h = single_gurobi_run(seed, tm_lim, tm_lim_tune, env, &p2);
     double *random_solution = blank_solution(samples);
@@ -427,6 +420,8 @@ tuning"); GRBwrite(model, "post.prm");*/
 
   TRY_MODEL(state = GRBsetcallbackfunc(model, gurobi_callback, env),
             "set callback");
+  TRY_MODEL(state = GRBsetdblparam(GRBgetenv(model), "NoRelHeurTime", 120),
+            "enable norel");
 
   /*    if(param_setting) {
         TRY_MODEL(state = GRBsetintparam(GRBgetenv(model), "Threads",
@@ -528,7 +523,10 @@ tuning"); GRBwrite(model, "post.prm");*/
 
   GRBwrite(model, "soln.sol");
 
-  GRBfreeenv(GRBgetenv(model));
+  // GRBenv *grbenv = GRBgetenv(model);
+  //  GRBfreeenv(grbenv);
+  //  these two frees should be in the other order, but that causes an error for
+  //  some reason
   GRBfreemodel(model);
 
   return result;
